@@ -1,0 +1,17 @@
+[package]
+name = "paddle-ocr-rust"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+keywords = ["paddle", "ocr"]
+license = "Apache-2.0"
+
+[dependencies]
+opencv = { version = "0.94.2" }
+image = "0.25"
+imageproc = "0.25"
+ndarray = "0.16"
+ort = { version = "2.0.0-rc.6" }
+geo-types = "0.7.15"
+geo-clipper = "0.9.0"
+clipper-sys = "0.8.0"
