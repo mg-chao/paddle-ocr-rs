@@ -1,12 +1,14 @@
-### paddle-ocr-rs
+[简体中文](./docs/README_zh-Hans.md)
 
-一个尝试通过 Rust 调用 PaddleOCR 实现图片文字提取的测试程序。
+## paddle-ocr-rs
 
-后续可能会将他作为 crate 发布，因为目前只是研发在 Rust 调用 PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。
+A test program attempting to extract text from images by calling PaddleOCR through Rust.
 
-#### 开发环境
+It may be published as a crate in the future, as it's currently just researching how to call PaddleOCR from Rust. The code is not well-organized yet. Future plans will be determined based on feedback from actual project usage.
 
-| 依赖 | 版本号 |
+#### Development Environment
+
+| Dependency | Version |
 |------------|-----------------------------|
 | rustc | 1.84.1 (e71f9a9a9 2025-01-27) |
 | cargo | 1.84.1 (66221abde 2024-11-19) |
@@ -14,27 +16,27 @@
 | OS | Windows 11 24H2 |
 | Paddle OCR | 4 |
 
-#### 模型来源
+#### Model Source
 
 [RapidOCR Docs](https://rapidai.github.io/RapidOCRDocs/main/model_list/)
 
-#### 相关事项
+#### Related Information
 
-项目可以认为是 RapidOCR 的 Rust 实现，代码参考自 RapidOCR 的 C++ 实现。
+This project can be considered a Rust implementation of RapidOCR, with code referenced from RapidOCR's C++ implementations.
 
-C++ 实现：[RapidOcrOnnx](https://github.com/RapidAI/RapidOcrOnnx)
+C++ implementation: [RapidOcrOnnx](https://github.com/RapidAI/RapidOcrOnnx)
 
-有个比较坑的点是项目用到了 OpenCV 做图片相关的处理，所以需要提供 OpenCV 环境。
+One tricky point is that the project uses OpenCV for image processing, so an OpenCV environment needs to be provided.
 
-OpenCV 的 crate 是 [opencv-rust](https://github.com/twistedfall/opencv-rust)，环境依赖安装在 README 上有介绍：[INSTALL.md](https://github.com/twistedfall/opencv-rust/blob/master/INSTALL.md)
+The OpenCV crate is [opencv-rust](https://github.com/twistedfall/opencv-rust), and installation dependencies are described in the README: [INSTALL.md](https://github.com/twistedfall/opencv-rust/blob/master/INSTALL.md)
 
-注意得把名为 opencv_worldxxxx.dll 的 dll 放在 ./target/debug 目录下。opencv-rust 的文档都有提及，在此就不赘叙了。
+Note that the DLL named opencv_worldxxxx.dll needs to be placed in the ./target/debug directory. This is mentioned in the opencv-rust documentation, so I won't elaborate further here.
 
-#### 效果展示
+#### Demo Results
 
 #### test_1.png
 
-![test_1](../test/test_1.png)
+![test_1](./test/test_1.png)
 
 ```bash
 paddle-ocr-rs
@@ -44,14 +46,14 @@ paddle-ocr-rs
 
 #### test_2.png
 
-![test_2](../test/test_2.png)
+![test_2](./test/test_2.png)
 
 ```bash
 母婴用品连
 锁
 ```
 
-#### 输出预览
+#### Output Preview
 
 ##### test_1.png
 
@@ -74,4 +76,3 @@ paddle-ocr-rs
 ~个尝试通过Rust 调用PaddleOCR 实现图片文字提取的测试程序。
 后续可能会将他作为 crate 发布，因为目前只是研发在 Rust 调用 PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。
 ```
-
