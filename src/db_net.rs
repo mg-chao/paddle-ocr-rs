@@ -1,8 +1,8 @@
 use crate::{
+    ocr_error::OcrError,
     ocr_result::{self, TextBox},
     ocr_utils::OcrUtils,
     scale_param::ScaleParam,
-    ocr_error::OcrError,
 };
 use geo_clipper::{Clipper, EndType, JoinType};
 use geo_types::{Coord, LineString, Polygon};
@@ -39,11 +39,7 @@ impl DbNet {
         }
     }
 
-    pub fn init_model(
-        &mut self,
-        path: &str,
-        num_thread: usize,
-    ) -> Result<(), OcrError> {
+    pub fn init_model(&mut self, path: &str, num_thread: usize) -> Result<(), OcrError> {
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level2)?
             .with_intra_threads(num_thread)?
@@ -117,24 +113,32 @@ impl DbNet {
 
         let (_, red_data) = output_tensor.iter().next().unwrap();
 
-        let pred_data: Vector<f32> = red_data
+        let mut pred_data: Vector<f32> = red_data
             .try_extract_tensor::<f32>()?
             .iter()
             .map(|&x| x)
             .collect();
 
-        let cbuf_data: Vector<u8> = pred_data
+        let mut cbuf_data: Vector<u8> = pred_data
             .iter()
             .map(|pixel| (pixel * 255.0) as u8)
             .collect();
 
-        let pred_mat = Mat::new_rows_cols_with_data(rows, cols, pred_data.as_ref())
-            .unwrap()
-            .clone_pointee();
+        let pred_mat = OcrUtils::create_mat_from_array(
+            rows,
+            cols,
+            opencv::core::CV_32FC1,
+            pred_data.as_mut_slice(),
+            0,
+        );
 
-        let cbuf_mat = Mat::new_rows_cols_with_data(rows, cols, cbuf_data.as_ref())
-            .unwrap()
-            .clone_pointee();
+        let cbuf_mat = OcrUtils::create_mat_from_array(
+            rows,
+            cols,
+            opencv::core::CV_8UC1,
+            cbuf_data.as_mut_slice(),
+            0,
+        );
 
         let mut threshold_mat = Mat::default();
         imgproc::threshold(
@@ -279,10 +283,7 @@ impl DbNet {
         Ok(box_points)
     }
 
-    fn get_score(
-        contour: &Vector<Point>,
-        f_map_mat: &Mat,
-    ) -> Result<f64, OcrError> {
+    fn get_score(contour: &Vector<Point>, f_map_mat: &Mat) -> Result<f64, OcrError> {
         // 初始化边界值
         let mut xmin = i32::MAX;
         let mut xmax = i32::MIN;
@@ -355,10 +356,7 @@ impl DbNet {
         Ok(mean[0])
     }
 
-    fn unclip(
-        box_points: &[Point2f],
-        unclip_ratio: f32,
-    ) -> Result<Vec<Point>, OcrError> {
+    fn unclip(box_points: &[Point2f], unclip_ratio: f32) -> Result<Vec<Point>, OcrError> {
         let mut points_arr = Vector::<Point2f>::new();
         for pt in box_points {
             points_arr.push(*pt);

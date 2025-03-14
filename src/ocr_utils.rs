@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use crate::{
     ocr_error::OcrError,
     ocr_result::{Point, TextBox},
@@ -12,6 +14,50 @@ use opencv::{
 pub struct OcrUtils;
 
 impl OcrUtils {
+    /// These are various constructors that form a matrix. As noted in the AutomaticAllocation, often
+    /// the default constructor is enough, and the proper matrix will be allocated by an OpenCV function.
+    /// The constructed matrix can further be assigned to another matrix or matrix expression or can be
+    /// allocated with Mat::create . In the former case, the old content is de-referenced.
+    ///
+    /// ## Overloaded parameters
+    ///
+    /// ## Parameters
+    /// * rows: Number of rows in a 2D array.
+    /// * cols: Number of columns in a 2D array.
+    /// * data: Pointer to the user data. Matrix constructors that take data and step parameters do not
+    /// allocate matrix data. Instead, they just initialize the matrix header that points to the specified
+    /// data, which means that no data is copied. This operation is very efficient and can be used to
+    /// process external data using OpenCV functions. The external data is not automatically deallocated, so
+    /// you should take care of it.
+    /// * step: Number of bytes each matrix row occupies. The value should include the padding bytes at
+    /// the end of each row, if any. If the parameter is missing (set to AUTO_STEP ), no padding is assumed
+    /// and the actual step is calculated as cols*elemSize(). See Mat::elemSize.
+    ///
+    /// ## C++ default parameters
+    /// * step: AUTO_STEP
+    pub fn create_mat_from_array<T: DataType>(
+        rows: i32,
+        cols: i32,
+        typ: i32,
+        array: &mut [T],
+        step: usize,
+    ) -> Mat {
+        unsafe {
+            Mat::new_rows_cols_with_data_unsafe(
+                rows,
+                cols,
+                typ,
+                array.as_mut_ptr().cast::<c_void>(),
+                step,
+            )
+            .unwrap()
+        }
+    }
+
+    pub fn create_mat_from_bgr8(rows: i32, cols: i32, array: &mut [u8]) -> Mat {
+        Self::create_mat_from_array(rows, cols, opencv::core::CV_8UC3, array, 0)
+    }
+
     pub fn substract_mean_normalize(
         src: &Mat,
         mean_vals: &[f32],
