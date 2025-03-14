@@ -2,9 +2,41 @@
 
 ## paddle-ocr-rs
 
-A test program attempting to extract text from images by calling PaddleOCR through Rust.
+A Rust implementation for text recognition in images using Paddle OCR models through ONNX Runtime.
 
-It may be published as a crate in the future, as it's currently just researching how to call PaddleOCR from Rust. The code is not well-organized yet. Future plans will be determined based on feedback from actual project usage.
+#### Example
+
+```rust
+use paddle_ocr_rs::{ocr_error::OcrError, ocr_lite::OcrLite};
+
+fn main() -> Result<(), OcrError> {
+    let mut ocr = OcrLite::new();
+    ocr.init_models(
+        "./models/ch_PP-OCRv4_det_infer.onnx",
+        "./models/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+        "./models/ch_PP-OCRv4_rec_infer.onnx",
+        "./models/ppocr_keys_v1.txt",
+        2,
+    )?;
+
+    println!("===test_1===");
+    let res = ocr.detect_from_path("./test/test_1.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+    println!("res: {}", res);
+    println!("===test_2===");
+    let res = ocr.detect_from_path("./test/test_2.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+    println!("res: {}", res);
+    Ok(())
+}
+```
+
+Output:
+
+```bash
+===test_1===
+res: TextBlock[BoxPointsLen(4), BoxScore(0.883992), AngleIndex(0), AngleScore(0.99999976), Text(后续可能会将他作为crate发布，因为目前只是研发在Rust调用PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。), TextScore(0.9849159)]TextBlock[BoxPointsLen(4), BoxScore(0.85958225), AngleIndex(0), AngleScore(0.89264715), Text(一个尝试通过 Rust 调用 PaddleOCR 实现图片文字提取的测试程序。), TextScore(0.9740863)]TextBlock[BoxPointsLen(4), BoxScore(0.85514736), AngleIndex(0), AngleScore(0.9953818), Text(paddle-ocr-rs), TextScore(0.99551016)]
+===test_2===
+res: TextBlock[BoxPointsLen(4), BoxScore(0.9570672), AngleIndex(0), AngleScore(0.9999999), Text(母婴用品连锁), TextScore(0.99932665)]
+```
 
 #### Development Environment
 
@@ -20,17 +52,17 @@ It may be published as a crate in the future, as it's currently just researching
 
 [RapidOCR Docs](https://rapidai.github.io/RapidOCRDocs/main/model_list/)
 
-#### Related Information
+#### Important Notes
 
-This project can be considered a Rust implementation of RapidOCR, with code referenced from RapidOCR's C++ implementations.
+This project can be considered as a Rust implementation of RapidOCR, with code referenced from RapidOCR's C++ implementation.
 
 C++ implementation: [RapidOcrOnnx](https://github.com/RapidAI/RapidOcrOnnx)
 
-One tricky point is that the project uses OpenCV for image processing, so an OpenCV environment needs to be provided.
+One tricky point is that the project uses OpenCV for image processing, so an OpenCV environment is required.
 
-The OpenCV crate is [opencv-rust](https://github.com/twistedfall/opencv-rust), and installation dependencies are described in the README: [INSTALL.md](https://github.com/twistedfall/opencv-rust/blob/master/INSTALL.md)
+The OpenCV crate used is [opencv-rust](https://github.com/twistedfall/opencv-rust), and the environment dependencies installation is described in the README: [INSTALL.md](https://github.com/twistedfall/opencv-rust/blob/master/INSTALL.md)
 
-Note that the DLL named opencv_worldxxxx.dll needs to be placed in the ./target/debug directory. This is mentioned in the opencv-rust documentation, so I won't elaborate further here.
+Note that you need to place the DLL named opencv_worldxxxx.dll in the ./target/debug directory. This is mentioned in the opencv-rust documentation, so we won't elaborate further here.
 
 #### Demo Results
 
@@ -39,9 +71,7 @@ Note that the DLL named opencv_worldxxxx.dll needs to be placed in the ./target/
 ![test_1](./test/test_1.png)
 
 ```bash
-paddle-ocr-rs
-~个尝试通过Rust 调用PaddleOCR 实现图片文字提取的测试程序。
-后续可能会将他作为 crate 发布，因为目前只是研发在 Rust 调用 PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。
+TextBlock[BoxPointsLen(4), BoxScore(0.883992), AngleIndex(0), AngleScore(0.99999976), Text(后续可能会将他作为crate发布，因为目前只是研发在Rust调用PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。), TextScore(0.9849159)]TextBlock[BoxPointsLen(4), BoxScore(0.85958225), AngleIndex(0), AngleScore(0.89264715), Text(一个尝试通过 Rust 调用 PaddleOCR 实现图片文字提取的测试程序。), TextScore(0.9740863)]TextBlock[BoxPointsLen(4), BoxScore(0.85514736), AngleIndex(0), AngleScore(0.9953818), Text(paddle-ocr-rs), TextScore(0.99551016)]
 ```
 
 #### test_2.png
@@ -49,30 +79,16 @@ paddle-ocr-rs
 ![test_2](./test/test_2.png)
 
 ```bash
-母婴用品连
-锁
+TextBlock[BoxPointsLen(4), BoxScore(0.9570672), AngleIndex(0), AngleScore(0.9999999), Text(母婴用品连锁), TextScore(0.99932665)]
 ```
 
 #### Output Preview
 
-##### test_1.png
-
 ```bash
-keys Size = 6625
-=====Start detect=====
----------- step: dbNet getTextBoxes ----------
-TextBoxesSize(3)
-TextBox { points: [Point { x: 102, y: 131 }, Point { x: 334, y: 177 }, Point { x: 327, y: 219 }, Point { x: 94, y: 174 }], score: 0.8739496 }
-TextBox { points: [Point { x: 90, y: 197 }, Point { x: 796, y: 333 }, Point { x: 790, y: 369 }, Point { x: 84, y: 233 }], score: 0.8564408 }
-TextBox { points: [Point { x: 77, y: 257 }, Point { x: 1478, y: 527 }, Point { x: 1472, y: 564 }, Point { x: 70, y: 294 }], score: 0.8536175 }
----------- step: drawTextBoxes ----------
----------- step: angleNet getAngles ----------
-AnglesSize(3)
-Angle { index: 0, score: 1.0, time: 15.0 }
-Angle { index: 0, score: 0.6775721, time: 14.0 }
-Angle { index: 0, score: 0.9986754, time: 13.0 }
----------- step: crnnNet getTextLines ----------
+===test_1===
 paddle-ocr-rs
-~个尝试通过Rust 调用PaddleOCR 实现图片文字提取的测试程序。
-后续可能会将他作为 crate 发布，因为目前只是研发在 Rust 调用 PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。
+一个尝试通过 Rust 调用 PaddleOCR 实现图片文字提取的测试程序。
+后续可能会将他作为crate发布，因为目前只是研发在Rust调用PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。
+===test_2===
+母婴用品连锁
 ```

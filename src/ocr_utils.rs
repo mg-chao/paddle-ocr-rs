@@ -1,8 +1,10 @@
-use crate::ocr_result::{Point, TextBox};
-use image::{ImageBuffer, Rgb};
+use crate::{
+    ocr_error::OcrError,
+    ocr_result::{Point, TextBox},
+};
 use ndarray::{Array, Array4};
 use opencv::{
-    core::{Mat, Point as CvPoint, Scalar, Size, Vector},
+    core::{Mat, Scalar, Size},
     imgproc::{get_perspective_transform, warp_perspective},
     prelude::*,
 };
@@ -40,10 +42,11 @@ impl OcrUtils {
         input_tensor
     }
 
-    pub fn make_padding(src: &Mat, padding: i32) -> Mat {
+    pub fn make_padding(src: &Mat, padding: i32) -> Result<Mat, OcrError> {
         if padding <= 0 {
-            return src.clone();
+            return Ok(src.clone());
         }
+
         let padding_scalar = Scalar::new(255.0, 255.0, 255.0, 0.0);
         let mut padding_src = Mat::default();
         opencv::core::copy_make_border(
@@ -55,42 +58,14 @@ impl OcrUtils {
             padding,
             opencv::core::BORDER_ISOLATED,
             padding_scalar,
-        )
-        .expect("Failed to make padding");
-        padding_src
+        )?;
+
+        Ok(padding_src)
     }
 
     pub fn get_thickness(box_img: &Mat) -> i32 {
         let min_size = box_img.cols().min(box_img.rows());
         min_size / 1000 + 2
-    }
-
-    pub fn draw_text_box(box_img: &mut Mat, box_points: &[Point], thickness: i32) {
-        if box_points.is_empty() {
-            return;
-        }
-        let color = Scalar::new(0.0, 0.0, 255.0, 0.0); // B(0) G(0) R(255)
-
-        for i in 0..4 {
-            let start = CvPoint::new(box_points[i].x, box_points[i].y);
-            let end = CvPoint::new(box_points[(i + 1) % 4].x, box_points[(i + 1) % 4].y);
-            opencv::imgproc::line(
-                box_img,
-                start,
-                end,
-                color,
-                thickness,
-                opencv::imgproc::LINE_8,
-                0,
-            )
-            .expect("Failed to draw line");
-        }
-    }
-
-    pub fn draw_text_boxes(src: &mut Mat, text_boxes: &[TextBox], thickness: i32) {
-        for text_box in text_boxes {
-            Self::draw_text_box(src, &text_box.points, thickness);
-        }
     }
 
     pub fn get_part_images(src: &Mat, text_boxes: &[TextBox]) -> Vec<Mat> {
@@ -186,38 +161,5 @@ impl OcrUtils {
 
     pub fn mat_rotate_clock_wise_180(src: &mut Mat) {
         opencv::core::flip(&src.clone(), src, -1).expect("Failed to flip");
-    }
-
-    pub fn mat_rotate_clock_wise_90(src: &mut Mat) {
-        opencv::core::rotate(&src.clone(), src, opencv::core::ROTATE_90_COUNTERCLOCKWISE)
-            .expect("Failed to rotate");
-    }
-
-    // 添加一个新函数，用于将预测数据保存为图像文件
-    fn save_pred_data_to_image(
-        r_pred_data: &Vector<u8>,
-        g_pred_data: &Vector<u8>,
-        b_pred_data: &Vector<u8>,
-        rows: i32,
-        cols: i32,
-        filename: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // 创建一个新的图像缓冲区
-        let mut img = ImageBuffer::<Rgb<u8>, Vec<u8>>::new(cols as u32, rows as u32);
-
-        for x in 0..cols {
-            for y in 0..rows {
-                let idx = (y * cols + x) as usize;
-                let r = r_pred_data.get(idx).unwrap();
-                let g = g_pred_data.get(idx).unwrap();
-                let b = b_pred_data.get(idx).unwrap();
-                img.put_pixel(x as u32, y as u32, Rgb([r, g, b]));
-            }
-        }
-        // 保存图像
-        img.save(filename)?;
-        println!("已保存预测结果到文件: {}", filename);
-
-        Ok(())
     }
 }

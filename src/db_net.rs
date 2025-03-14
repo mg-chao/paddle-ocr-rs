@@ -2,6 +2,7 @@ use crate::{
     ocr_result::{self, TextBox},
     ocr_utils::OcrUtils,
     scale_param::ScaleParam,
+    ocr_error::OcrError,
 };
 use geo_clipper::{Clipper, EndType, JoinType};
 use geo_types::{Coord, LineString, Polygon};
@@ -42,7 +43,7 @@ impl DbNet {
         &mut self,
         path: &str,
         num_thread: usize,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), OcrError> {
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level2)?
             .with_intra_threads(num_thread)?
@@ -69,9 +70,9 @@ impl DbNet {
         box_score_thresh: f32,
         box_thresh: f32,
         un_clip_ratio: f32,
-    ) -> Result<Vec<TextBox>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<TextBox>, OcrError> {
         let Some(session) = &self.session else {
-            return Err("DbNet model not initialized".into());
+            return Err(OcrError::SessionNotInitialized);
         };
 
         let mut src_resize = Mat::default();
@@ -110,26 +111,23 @@ impl DbNet {
         box_score_thresh: f32,
         box_thresh: f32,
         un_clip_ratio: f32,
-    ) -> Result<Vec<TextBox>, Box<dyn std::error::Error>> {
-        let max_side_thresh = 3.0; // 长边门限
+    ) -> Result<Vec<TextBox>, OcrError> {
+        let max_side_thresh = 3.0;
         let mut rs_boxes = Vec::new();
 
         let (_, red_data) = output_tensor.iter().next().unwrap();
 
-        // 从 tensor 数据中获取预测结果
         let pred_data: Vector<f32> = red_data
             .try_extract_tensor::<f32>()?
             .iter()
             .map(|&x| x)
             .collect();
 
-        // 更高效的方法：预分配内存并使用迭代器方法一次性转换
         let cbuf_data: Vector<u8> = pred_data
             .iter()
             .map(|pixel| (pixel * 255.0) as u8)
             .collect();
 
-        // 直接使用引用数据，避免深拷贝
         let pred_mat = Mat::new_rows_cols_with_data(rows, cols, pred_data.as_ref())
             .unwrap()
             .clone_pointee();
@@ -138,7 +136,6 @@ impl DbNet {
             .unwrap()
             .clone_pointee();
 
-        // Threshold
         let mut threshold_mat = Mat::default();
         imgproc::threshold(
             &cbuf_mat,
@@ -148,7 +145,6 @@ impl DbNet {
             imgproc::THRESH_BINARY,
         )?;
 
-        // Dilate
         let mut dilate_mat = Mat::default();
         let dilate_element = imgproc::get_structuring_element(
             imgproc::MORPH_RECT,
@@ -235,7 +231,7 @@ impl DbNet {
     fn get_mini_box(
         contour: &Vector<Point>,
         min_edge_size: &mut f32,
-    ) -> Result<Vec<Point2f>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<Point2f>, OcrError> {
         let rrect: RotatedRect = imgproc::min_area_rect(&contour)?;
 
         let mut points = [Point2f::default(); 4];
@@ -286,7 +282,7 @@ impl DbNet {
     fn get_score(
         contour: &Vector<Point>,
         f_map_mat: &Mat,
-    ) -> Result<f64, Box<dyn std::error::Error>> {
+    ) -> Result<f64, OcrError> {
         // 初始化边界值
         let mut xmin = i32::MAX;
         let mut xmax = i32::MIN;
@@ -320,7 +316,6 @@ impl DbNet {
         ymin = ymin.max(0).min(height - 1);
         ymax = ymax.max(0).min(height - 1);
 
-        // 更新ROI尺寸
         let roi_width = xmax - xmin + 1;
         let roi_height = ymax - ymin + 1;
 
@@ -328,7 +323,6 @@ impl DbNet {
             return Ok(0.0);
         }
 
-        // 创建掩码
         let mut mask = Mat::new_rows_cols_with_default(
             roi_height,
             roi_width,
@@ -336,13 +330,11 @@ impl DbNet {
             Scalar::all(0.0),
         )?;
 
-        // 创建多边形点（相对于ROI区域的坐标）
         let mut pts = Vector::<Point>::new();
         for point in contour {
             pts.push(Point::new((point.x as i32) - xmin, (point.y as i32) - ymin));
         }
 
-        // 填充多边形
         let mut vpp_array = Vector::<Vector<Point>>::new();
         vpp_array.push(pts);
 
@@ -355,11 +347,9 @@ impl DbNet {
             Point::default(),
         )?;
 
-        // 获取ROI区域
         let roi = opencv::core::Rect::new(xmin, ymin, roi_width, roi_height);
         let cropped_img = f_map_mat.roi(roi)?;
 
-        // 计算平均值
         let mean = opencv::core::mean(&cropped_img, &mask)?;
 
         Ok(mean[0])
@@ -368,7 +358,7 @@ impl DbNet {
     fn unclip(
         box_points: &[Point2f],
         unclip_ratio: f32,
-    ) -> Result<Vec<Point>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<Point>, OcrError> {
         let mut points_arr = Vector::<Point2f>::new();
         for pt in box_points {
             points_arr.push(*pt);
@@ -388,7 +378,6 @@ impl DbNet {
             the_cliper_pts.push(a1);
         }
 
-        // Calculate area and length
         let area = Self::signed_polygon_area(box_points).abs();
         let length = Self::length_of_points(box_points);
         let distance = area * unclip_ratio as f32 / length as f32;
@@ -416,13 +405,11 @@ impl DbNet {
     }
 
     fn signed_polygon_area(points: &[Point2f]) -> f32 {
-        // Add the first point to the end
         let num_points = points.len();
         let mut pts = Vec::with_capacity(num_points + 1);
         pts.extend_from_slice(points);
         pts.push(points[0]);
 
-        // Calculate area
         let mut area = 0.0;
         for i in 0..num_points {
             area += (pts[i + 1].x - pts[i].x) * (pts[i + 1].y + pts[i].y) / 2.0;
@@ -441,7 +428,6 @@ impl DbNet {
         let mut x0 = pt.x as f64;
         let mut y0 = pt.y as f64;
 
-        // Create a copy with the first point added to the end
         let mut box_with_first = Vec::from(box_points);
         box_with_first.push(pt);
 

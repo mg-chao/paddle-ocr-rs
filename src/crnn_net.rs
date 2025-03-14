@@ -7,13 +7,12 @@ use ort::session::Session;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::time::Instant;
 
+use crate::ocr_error::OcrError;
 use crate::ocr_result::TextLine;
 use crate::ocr_utils::OcrUtils;
 
 const CRNN_DST_HEIGHT: i32 = 48;
-const CRNN_COLS: i32 = 6625;
 const MEAN_VALUES: [f32; 3] = [127.5, 127.5, 127.5];
 const NORM_VALUES: [f32; 3] = [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5];
 
@@ -38,14 +37,13 @@ impl CrnnNet {
         path: &str,
         keys_path: &str,
         num_thread: usize,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), OcrError> {
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level2)?
             .with_intra_threads(num_thread)?
             .with_inter_threads(num_thread)?
             .commit_from_file(path)?;
 
-        // Get input names
         let input_names: Vec<String> = session
             .inputs
             .iter()
@@ -55,16 +53,12 @@ impl CrnnNet {
         self.input_names = input_names;
         self.session = Some(session);
 
-        // 初始化字符集
         self.keys = self.get_keys(keys_path)?;
 
         Ok(())
     }
 
-    fn get_keys<P: AsRef<Path>>(
-        &mut self,
-        path: P,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    fn get_keys<P: AsRef<Path>>(&mut self, path: P) -> Result<Vec<String>, OcrError> {
         let mut keys = Vec::new();
 
         keys.push("#".to_string());
@@ -77,31 +71,24 @@ impl CrnnNet {
         }
 
         keys.push(" ".to_string());
-        println!("keys Size = {}", keys.len());
 
         Ok(keys)
     }
 
-    pub fn get_text_lines(
-        &self,
-        part_imgs: &Vec<Mat>,
-    ) -> Result<Vec<TextLine>, Box<dyn std::error::Error>> {
+    pub fn get_text_lines(&self, part_imgs: &Vec<Mat>) -> Result<Vec<TextLine>, OcrError> {
         let mut text_lines = Vec::new();
 
         for img in part_imgs {
-            let start = Instant::now();
-            let mut text_line = self.get_text_line(img)?;
-            let crnn_time = (start.elapsed().as_millis() as f32) / 1000.0;
-            text_line.time = crnn_time;
+            let text_line = self.get_text_line(img)?;
             text_lines.push(text_line);
         }
 
         Ok(text_lines)
     }
 
-    fn get_text_line(&self, src: &Mat) -> Result<TextLine, Box<dyn std::error::Error>> {
+    fn get_text_line(&self, src: &Mat) -> Result<TextLine, OcrError> {
         let Some(session) = &self.session else {
-            return Err("AngleNet model not initialized".into());
+            return Err(OcrError::SessionNotInitialized);
         };
 
         let scale = CRNN_DST_HEIGHT as f32 / src.rows() as f32;
@@ -140,10 +127,12 @@ impl CrnnNet {
         output_data: &Vec<f32>,
         height: usize,
         width: usize,
-    ) -> Result<TextLine, Box<dyn std::error::Error>> {
+    ) -> Result<TextLine, OcrError> {
         let mut text_line = TextLine::default();
         let mut last_index = 0;
 
+        let mut text_score_sum = 0.0;
+        let mut text_socre_count = 0;
         for i in 0..height {
             let start = i * width;
             let stop = (i + 1) * width;
@@ -162,18 +151,14 @@ impl CrnnNet {
                     });
 
             if max_index > 0 && max_index < self.keys.len() && !(i > 0 && max_index == last_index) {
-                text_line.char_scores.push(max_value);
                 text_line.text.push_str(&self.keys[max_index]);
+                text_score_sum += max_value;
+                text_socre_count += 1;
             }
             last_index = max_index;
         }
 
+        text_line.text_score = text_score_sum / text_socre_count as f32;
         Ok(text_line)
-    }
-}
-
-impl Drop for CrnnNet {
-    fn drop(&mut self) {
-        // ONNX Runtime 会自动处理资源清理
     }
 }

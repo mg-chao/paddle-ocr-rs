@@ -6,9 +6,8 @@ use ort::{
     inputs,
     session::{builder::GraphOptimizationLevel, Session, SessionOutputs},
 };
-use std::time::Instant;
 
-use crate::{ocr_result::Angle, ocr_utils::OcrUtils};
+use crate::{ocr_error::OcrError, ocr_result::Angle, ocr_utils::OcrUtils};
 
 const MEAN_VALUES: [f32; 3] = [127.5, 127.5, 127.5];
 const NORM_VALUES: [f32; 3] = [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5];
@@ -34,14 +33,13 @@ impl AngleNet {
         &mut self,
         path: &str,
         num_thread: usize,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), OcrError> {
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level2)?
             .with_intra_threads(num_thread)?
             .with_inter_threads(num_thread)?
             .commit_from_file(path)?;
 
-        // Get input names
         let input_names: Vec<String> = session
             .inputs
             .iter()
@@ -59,14 +57,12 @@ impl AngleNet {
         part_imgs: &[Mat],
         do_angle: bool,
         most_angle: bool,
-    ) -> Result<Vec<Angle>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<Angle>, OcrError> {
         let mut angles = Vec::new();
 
         if do_angle {
             for img in part_imgs {
-                let start = Instant::now();
-                let mut angle = self.get_angle(img)?;
-                angle.time = start.elapsed().as_millis() as f32;
+                let angle = self.get_angle(img)?;
                 angles.push(angle);
             }
         } else {
@@ -78,7 +74,6 @@ impl AngleNet {
             let half_percent = angles.len() as f32 / 2.0;
             let most_angle_index = if (sum as f32) < half_percent { 0 } else { 1 };
 
-            println!("Set All Angle to mostAngleIndex({})", most_angle_index);
             for angle in angles.iter_mut() {
                 angle.index = most_angle_index;
             }
@@ -87,11 +82,11 @@ impl AngleNet {
         Ok(angles)
     }
 
-    fn get_angle(&self, src: &Mat) -> Result<Angle, Box<dyn std::error::Error>> {
+    fn get_angle(&self, src: &Mat) -> Result<Angle, OcrError> {
         let angle;
 
         let Some(session) = &self.session else {
-            return Err("AngleNet model not initialized".into());
+            return Err(OcrError::SessionNotInitialized);
         };
 
         let mut angle_img = Mat::default();
@@ -119,10 +114,9 @@ impl AngleNet {
         &self,
         output_tensor: &SessionOutputs,
         angle_cols: usize,
-    ) -> Result<Angle, Box<dyn std::error::Error>> {
+    ) -> Result<Angle, OcrError> {
         let (_, red_data) = output_tensor.iter().next().unwrap();
 
-        // 从 tensor 数据中获取预测结果
         let src_data: Vector<f32> = red_data
             .try_extract_tensor::<f32>()?
             .iter()
