@@ -20,4 +20,6 @@ clipper-sys = "0.8.0"
 thiserror = "2.0.12"
 
 [features]
+default = ["download-binaries", "copy-dylibs", "ort/default"]
 download-binaries = ["ort/download-binaries"]
+copy-dylibs = ["ort/copy-dylibs"]
