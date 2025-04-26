@@ -1,10 +1,4 @@
-﻿use opencv::{
-    core::Mat,
-    imgcodecs::{imread, IMREAD_COLOR},
-    prelude::*,
-};
-
-use crate::{
+﻿use crate::{
     angle_net::AngleNet,
     crnn_net::CrnnNet,
     db_net::DbNet,
@@ -46,16 +40,16 @@ impl OcrLite {
 
     pub fn detect(
         &self,
-        src: &Mat,
-        padding: i32,
-        max_side_len: i32,
+        img_src: &image::RgbImage,
+        padding: u32,
+        max_side_len: u32,
         box_score_thresh: f32,
         box_thresh: f32,
         un_clip_ratio: f32,
         do_angle: bool,
         most_angle: bool,
     ) -> Result<OcrResult, OcrError> {
-        let origin_max_side = src.cols().max(src.rows());
+        let origin_max_side = img_src.width().max(img_src.height());
         let mut resize;
         if max_side_len <= 0 || max_side_len > origin_max_side {
             resize = origin_max_side;
@@ -64,7 +58,7 @@ impl OcrLite {
         }
         resize += 2 * padding;
 
-        let mut padding_src = OcrUtils::make_padding(src, padding)?;
+        let mut padding_src = OcrUtils::make_padding(img_src, padding)?;
 
         let scale = ScaleParam::get_scale_param(&padding_src, resize);
 
@@ -82,20 +76,20 @@ impl OcrLite {
     pub fn detect_from_path(
         &self,
         img_path: &str,
-        padding: i32,
-        max_side_len: i32,
+        padding: u32,
+        max_side_len: u32,
         box_score_thresh: f32,
         box_thresh: f32,
         un_clip_ratio: f32,
         do_angle: bool,
         most_angle: bool,
     ) -> Result<OcrResult, OcrError> {
-        let src = imread(img_path, IMREAD_COLOR)?;
+        let mut img_src = image::open(img_path)?.to_rgb8();
 
         self.detect(
-            &src,
-            padding,
-            max_side_len,
+            &mut img_src,
+            padding as u32,
+            max_side_len as u32,
             box_score_thresh,
             box_thresh,
             un_clip_ratio,
@@ -106,7 +100,7 @@ impl OcrLite {
 
     fn detect_once(
         &self,
-        src: &mut Mat,
+        img_src: &mut image::RgbImage,
         scale: &ScaleParam,
         box_score_thresh: f32,
         box_thresh: f32,
@@ -114,27 +108,21 @@ impl OcrLite {
         do_angle: bool,
         most_angle: bool,
     ) -> Result<OcrResult, OcrError> {
-        let text_boxes =
-            self.db_net
-                .get_text_boxes(src, scale, box_score_thresh, box_thresh, un_clip_ratio)?;
+        let text_boxes = self.db_net.get_text_boxes(
+            img_src,
+            scale,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+        )?;
 
-        let mut part_images = OcrUtils::get_part_images(src, &text_boxes);
+        let part_images = OcrUtils::get_part_images(img_src, &text_boxes);
 
         let angles = self
             .angle_net
             .get_angles(&part_images, do_angle, most_angle)?;
 
-        let mut rotated_images: Vec<Mat> = Vec::with_capacity(part_images.len());
-        for i in (0..angles.len()).rev() {
-            if let Some(mut img) = part_images.pop() {
-                if angles[i].index == 1 {
-                    OcrUtils::mat_rotate_clock_wise_180(&mut img);
-                }
-                rotated_images.push(img);
-            }
-        }
-
-        let text_lines = self.crnn_net.get_text_lines(&rotated_images)?;
+        let text_lines = self.crnn_net.get_text_lines(&part_images)?;
 
         let mut text_blocks = Vec::with_capacity(text_lines.len());
         for i in 0..text_lines.len() {

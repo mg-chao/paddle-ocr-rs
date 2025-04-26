@@ -1,7 +1,3 @@
-use opencv::{
-    core::{Mat, Size, Vector},
-    imgproc,
-};
 use ort::{
     inputs,
     session::{builder::GraphOptimizationLevel, Session, SessionOutputs},
@@ -11,8 +7,8 @@ use crate::{ocr_error::OcrError, ocr_result::Angle, ocr_utils::OcrUtils};
 
 const MEAN_VALUES: [f32; 3] = [127.5, 127.5, 127.5];
 const NORM_VALUES: [f32; 3] = [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5];
-const ANGLE_DST_WIDTH: i32 = 192;
-const ANGLE_DST_HEIGHT: i32 = 48;
+const ANGLE_DST_WIDTH: u32 = 192;
+const ANGLE_DST_HEIGHT: u32 = 48;
 const ANGLE_COLS: usize = 2;
 
 #[derive(Debug)]
@@ -29,11 +25,7 @@ impl AngleNet {
         }
     }
 
-    pub fn init_model(
-        &mut self,
-        path: &str,
-        num_thread: usize,
-    ) -> Result<(), OcrError> {
+    pub fn init_model(&mut self, path: &str, num_thread: usize) -> Result<(), OcrError> {
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level2)?
             .with_intra_threads(num_thread)?
@@ -54,7 +46,7 @@ impl AngleNet {
 
     pub fn get_angles(
         &self,
-        part_imgs: &[Mat],
+        part_imgs: &[image::RgbImage],
         do_angle: bool,
         most_angle: bool,
     ) -> Result<Vec<Angle>, OcrError> {
@@ -82,23 +74,19 @@ impl AngleNet {
         Ok(angles)
     }
 
-    fn get_angle(&self, src: &Mat) -> Result<Angle, OcrError> {
+    fn get_angle(&self, img_src: &image::RgbImage) -> Result<Angle, OcrError> {
         let angle;
 
         let Some(session) = &self.session else {
             return Err(OcrError::SessionNotInitialized);
         };
 
-        let mut angle_img = Mat::default();
-        imgproc::resize(
-            src,
-            &mut angle_img,
-            Size::new(ANGLE_DST_WIDTH, ANGLE_DST_HEIGHT),
-            0.0,
-            0.0,
-            imgproc::INTER_LINEAR,
-        )
-        .unwrap();
+        let angle_img = image::imageops::resize(
+            img_src,
+            ANGLE_DST_WIDTH as u32,
+            ANGLE_DST_HEIGHT as u32,
+            image::imageops::FilterType::Triangle,
+        );
 
         let input_tensors =
             OcrUtils::substract_mean_normalize(&angle_img, &MEAN_VALUES, &NORM_VALUES);
@@ -117,7 +105,7 @@ impl AngleNet {
     ) -> Result<Angle, OcrError> {
         let (_, red_data) = output_tensor.iter().next().unwrap();
 
-        let src_data: Vector<f32> = red_data
+        let src_data: Vec<f32> = red_data
             .try_extract_tensor::<f32>()?
             .iter()
             .map(|&x| x)
@@ -128,8 +116,8 @@ impl AngleNet {
         let mut angle_index = 0;
 
         for (i, value) in src_data.iter().take(angle_cols).enumerate() {
-            if i == 0 || value > max_value {
-                max_value = value;
+            if i == 0 || value > &max_value {
+                max_value = *value;
                 angle_index = i as i32;
             }
         }

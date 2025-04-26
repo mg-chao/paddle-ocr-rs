@@ -4,10 +4,10 @@ use thiserror::Error;
 pub enum OcrError {
     #[error("Ort error")]
     Ort(#[from] ort::Error),
-    #[error("OpenCV error")]
-    OpenCv(#[from] opencv::Error),
     #[error("Io error")]
     Io(#[from] std::io::Error),
     #[error("Session not initialized")]
+    ImageError(#[from] image::ImageError),
+    #[error("Image error")]
     SessionNotInitialized,
 }
