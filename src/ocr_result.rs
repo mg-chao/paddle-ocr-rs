@@ -2,12 +2,6 @@ use std::fmt::{self, Write};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Point {
-    pub x: i32,
-    pub y: i32,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct PointV2 {
     pub x: u32,
     pub y: u32,
 }
@@ -19,30 +13,6 @@ pub struct TextBox {
 }
 
 impl fmt::Display for TextBox {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "TextBox [score({}), [x: {}, y: {}], [x: {}, y: {}], [x: {}, y: {}], [x: {}, y: {}]]",
-            self.score,
-            self.points[0].x,
-            self.points[0].y,
-            self.points[1].x,
-            self.points[1].y,
-            self.points[2].x,
-            self.points[2].y,
-            self.points[3].x,
-            self.points[3].y,
-        )
-    }
-}
-
-#[derive(Debug)]
-pub struct TextBoxV2 {
-    pub points: Vec<PointV2>,
-    pub score: f32,
-}
-
-impl fmt::Display for TextBoxV2 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -110,47 +80,11 @@ pub struct TextBlock {
 }
 
 #[derive(Debug)]
-pub struct TextBlockV2 {
-    pub box_points: Vec<PointV2>,
-    pub box_score: f32,
-
-    pub angle_index: i32,
-    pub angle_score: f32,
-
-    pub text: String,
-    pub text_score: f32,
-}
-
-#[derive(Debug)]
 pub struct OcrResult {
     pub text_blocks: Vec<TextBlock>,
 }
 
 impl fmt::Display for OcrResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut str_builder = String::with_capacity(0);
-        for text_block in &self.text_blocks {
-            write!(
-                str_builder,
-                "TextBlock[BoxPointsLen({}), BoxScore({}), AngleIndex({}), AngleScore({}), Text({}), TextScore({})]",
-                text_block.box_points.len(),
-                text_block.box_score,
-                text_block.angle_index,
-                text_block.angle_score,
-                text_block.text,
-                text_block.text_score
-            )?;
-        }
-        f.write_str(&str_builder)
-    }
-}
-
-#[derive(Debug)]
-pub struct OcrResultV2 {
-    pub text_blocks: Vec<TextBlockV2>,
-}
-
-impl fmt::Display for OcrResultV2 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut str_builder = String::with_capacity(0);
         for text_block in &self.text_blocks {

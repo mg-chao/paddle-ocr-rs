@@ -1,6 +1,3 @@
-use opencv as cv;
-use opencv::core::{Mat, Size};
-use opencv::prelude::*;
 use ort::inputs;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
@@ -75,7 +72,10 @@ impl CrnnNet {
         Ok(keys)
     }
 
-    pub fn get_text_lines(&self, part_imgs: &Vec<Mat>) -> Result<Vec<TextLine>, OcrError> {
+    pub fn get_text_lines(
+        &self,
+        part_imgs: &Vec<image::RgbImage>,
+    ) -> Result<Vec<TextLine>, OcrError> {
         let mut text_lines = Vec::new();
 
         for img in part_imgs {
@@ -86,57 +86,7 @@ impl CrnnNet {
         Ok(text_lines)
     }
 
-    pub fn get_text_lines_v2(
-        &self,
-        part_imgs: &Vec<image::RgbImage>,
-    ) -> Result<Vec<TextLine>, OcrError> {
-        let mut text_lines = Vec::new();
-
-        for img in part_imgs {
-            let text_line = self.get_text_line_v2(img)?;
-            text_lines.push(text_line);
-        }
-
-        Ok(text_lines)
-    }
-
-    fn get_text_line(&self, src: &Mat) -> Result<TextLine, OcrError> {
-        let Some(session) = &self.session else {
-            return Err(OcrError::SessionNotInitialized);
-        };
-
-        let scale = CRNN_DST_HEIGHT as f32 / src.rows() as f32;
-        let dst_width = (src.cols() as f32 * scale) as i32;
-
-        let mut src_resize = Mat::default();
-        cv::imgproc::resize(
-            &src,
-            &mut src_resize,
-            Size::new(dst_width, CRNN_DST_HEIGHT as i32),
-            0.0,
-            0.0,
-            cv::imgproc::INTER_LINEAR,
-        )
-        .unwrap();
-
-        let input_tensors =
-            OcrUtils::substract_mean_normalize(&src_resize, &MEAN_VALUES, &NORM_VALUES);
-
-        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
-
-        let (_, red_data) = outputs.iter().next().unwrap();
-
-        let src_data = red_data.try_extract_tensor::<f32>()?;
-
-        let dimensions = src_data.shape();
-        let height = dimensions[1];
-        let width = dimensions[2];
-        let src_data: Vec<f32> = src_data.iter().map(|&x| x).collect();
-
-        self.score_to_text_line(&src_data, height, width)
-    }
-
-    fn get_text_line_v2(&self, img_src: &image::RgbImage) -> Result<TextLine, OcrError> {
+    fn get_text_line(&self, img_src: &image::RgbImage) -> Result<TextLine, OcrError> {
         let Some(session) = &self.session else {
             return Err(OcrError::SessionNotInitialized);
         };
@@ -152,7 +102,7 @@ impl CrnnNet {
         );
 
         let input_tensors =
-            OcrUtils::substract_mean_normalize_v2(&src_resize, &MEAN_VALUES, &NORM_VALUES);
+            OcrUtils::substract_mean_normalize(&src_resize, &MEAN_VALUES, &NORM_VALUES);
 
         let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
 

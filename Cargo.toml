@@ -1,6 +1,6 @@
 [package]
 name = "paddle-ocr-rs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 readme = "README.md"
 keywords = ["paddle", "ocr", "onnx"]
@@ -10,7 +10,6 @@ repository = "https://github.com/mg-chao/paddle-ocr-rs"
 authors = ["mg-chao <chao@mgchao.top>"]
 
 [dependencies]
-opencv = { version = "0.94.2" }
 imageproc = "0.25"
 ndarray = "0.16"
 ort = { version = "2.0.0-rc.6" }

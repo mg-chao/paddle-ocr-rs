@@ -1,22 +1,19 @@
-﻿use opencv::core::Mat;
-use opencv::prelude::MatTraitConst;
-
-#[derive(Debug)]
+﻿#[derive(Debug)]
 pub struct ScaleParam {
-    pub src_width: i32,
-    pub src_height: i32,
-    pub dst_width: i32,
-    pub dst_height: i32,
+    pub src_width: u32,
+    pub src_height: u32,
+    pub dst_width: u32,
+    pub dst_height: u32,
     pub scale_width: f32,
     pub scale_height: f32,
 }
 
 impl ScaleParam {
     pub fn new(
-        src_width: i32,
-        src_height: i32,
-        dst_width: i32,
-        dst_height: i32,
+        src_width: u32,
+        src_height: u32,
+        dst_width: u32,
+        dst_height: u32,
         scale_width: f32,
         scale_height: f32,
     ) -> Self {
@@ -29,9 +26,10 @@ impl ScaleParam {
             scale_height,
         }
     }
-    pub fn get_scale_param(src: &Mat, target_size: i32) -> Self {
-        let src_width = src.cols();
-        let src_height = src.rows();
+
+    pub fn get_scale_param(src: &image::RgbImage, target_size: u32) -> Self {
+        let src_width = src.width();
+        let src_height = src.height();
         let mut dst_width;
         let mut dst_height;
 
@@ -41,8 +39,8 @@ impl ScaleParam {
             target_size as f32 / src_height as f32
         };
 
-        dst_width = (src_width as f32 * ratio) as i32;
-        dst_height = (src_height as f32 * ratio) as i32;
+        dst_width = (src_width as f32 * ratio) as u32;
+        dst_height = (src_height as f32 * ratio) as u32;
 
         if dst_width % 32 != 0 {
             dst_width = (dst_width / 32) * 32;

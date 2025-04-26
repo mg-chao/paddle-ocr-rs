@@ -6,7 +6,6 @@ pub mod ocr_lite;
 pub mod ocr_result;
 pub mod ocr_utils;
 pub mod scale_param;
-pub mod scale_param_v2;
 
 #[cfg(test)]
 mod tests {
@@ -29,7 +28,7 @@ mod tests {
         println!("res: {}", res);
         println!("===test_2===");
         let res =
-            ocr.detect_from_path_v2("./test/test_1.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+            ocr.detect_from_path("./test/test_2.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
         println!("res: {}", res);
 
         Ok(())
