@@ -63,7 +63,7 @@ fn run_test() -> Result<(), OcrError> {
 
 #### test_1.png
 
-![test_1](./test_images/test_1.png)
+![test_1](/docs/test_images/test_1.png)
 
 ```bash
 text: 使用Rust 通过ONNX Runtime 调用 Paddle OCR 模型进行图片文字识别。 score: 0.95269924
@@ -72,7 +72,7 @@ text: paddle-ocr-rs score: 0.9979071
 
 #### test_2.png
 
-![test_2](./test_images/test_2.png)
+![test_2](/docs/test_images/test_2.png)
 
 ```bash
 text: 母婴用品连锁 score: 0.99713486
@@ -80,7 +80,7 @@ text: 母婴用品连锁 score: 0.99713486
 
 #### test_3.png
 
-![test_3](./test_images/test_3.png)
+![test_3](/docs/test_images/test_3.png)
 
 #### 输出预览
 
