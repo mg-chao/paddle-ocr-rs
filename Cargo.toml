@@ -12,9 +12,14 @@ authors = ["mg-chao <chao@mgchao.top>"]
 [dependencies]
 imageproc = "0.25"
 ndarray = "0.16"
-ort = { version = "2.0.0-rc.6" }
+ort = { version = "2.0.0-rc.6", default-features = false, features = ["ndarray"] }
 geo-types = "0.7.15"
 geo-clipper = "0.9.0"
 clipper-sys = "0.8.0"
 thiserror = "2.0.12"
 image = "0.25.6"
+
+[features]
+default = ["download-binaries", "copy-dylibs", "ort/default"]
+download-binaries = ["ort/download-binaries"]
+copy-dylibs = ["ort/copy-dylibs"]
