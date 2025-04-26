@@ -116,13 +116,23 @@ impl OcrLite {
             un_clip_ratio,
         )?;
 
-        let part_images = OcrUtils::get_part_images(img_src, &text_boxes);
+        let mut part_images = OcrUtils::get_part_images(img_src, &text_boxes);
 
         let angles = self
             .angle_net
             .get_angles(&part_images, do_angle, most_angle)?;
 
-        let text_lines = self.crnn_net.get_text_lines(&part_images)?;
+        let mut rotated_images: Vec<image::RgbImage> = Vec::with_capacity(part_images.len());
+        for i in (0..angles.len()).rev() {
+            if let Some(mut img) = part_images.pop() {
+                if angles[i].index == 1 {
+                    OcrUtils::mat_rotate_clock_wise_180(&mut img);
+                }
+                rotated_images.push(img);
+            }
+        }
+
+        let text_lines = self.crnn_net.get_text_lines(&rotated_images)?;
 
         let mut text_blocks = Vec::with_capacity(text_lines.len());
         for i in 0..text_lines.len() {
