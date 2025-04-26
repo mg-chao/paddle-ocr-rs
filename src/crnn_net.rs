@@ -98,7 +98,7 @@ impl CrnnNet {
             img_src,
             dst_width as u32,
             CRNN_DST_HEIGHT as u32,
-            image::imageops::FilterType::Triangle,
+            image::imageops::FilterType::Nearest,
         );
 
         let input_tensors =

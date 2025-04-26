@@ -85,7 +85,7 @@ impl AngleNet {
             img_src,
             ANGLE_DST_WIDTH as u32,
             ANGLE_DST_HEIGHT as u32,
-            image::imageops::FilterType::Triangle,
+            image::imageops::FilterType::Nearest,
         );
 
         let input_tensors =
