@@ -2,12 +2,12 @@
 
 使用 Rust 通过 ONNX Runtime 调用 Paddle OCR 模型进行图片文字识别。
 
-#### 示例
+### 示例
 
 ```rust
-use paddle_ocr_rs::{ocr_error::OcrError, ocr_lite::OcrLite, ocr_utils::OcrUtils};
+use crate::{ocr_error::OcrError, ocr_lite::OcrLite};
 
-fn main() -> Result<(), OcrError> {
+fn run_test() -> Result<(), OcrError> {
     let mut ocr = OcrLite::new();
     ocr.init_models(
         "./models/ch_PP-OCRv4_det_infer.onnx",
@@ -17,86 +17,82 @@ fn main() -> Result<(), OcrError> {
         2,
     )?;
 
-    // 从图片路径检测
     println!("===test_1===");
-    let res = ocr.detect_from_path("./test/test_1.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
-    println!("res: {}", res);
-
-    // 更常用地从像素素组检测
+    let res =
+        ocr.detect_from_path("./test/test_1.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+    res.text_blocks.iter().for_each(|item| {
+        println!("text: {} score: {}", item.text, item.text_score);
+    });
     println!("===test_2===");
-    let img = image::open("./test/test_2.png").unwrap();
-    let mut img_array = img.to_rgb8();
-    // OpenCV 常用 BGR 格式，这里用 RGB 一般也不影响
-    let img_mat =
-        OcrUtils::create_mat_from_bgr8(img.height() as i32, img.width() as i32, img_array.as_mut());
-    let res = ocr.detect(&img_mat, 50, 1024, 0.5, 0.3, 1.6, true, false)?;
-    println!("res: {}", res);
+    let res =
+        ocr.detect_from_path("./test/test_2.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+    res.text_blocks.iter().for_each(|item| {
+        println!("text: {} score: {}", item.text, item.text_score);
+    });
+    println!("===test_3===");
+    let res =
+        ocr.detect_from_path("./test/test_3.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+    res.text_blocks.iter().for_each(|item| {
+        println!("text: {} score: {}", item.text, item.text_score);
+    });
 
     Ok(())
 }
 ```
 
-Output:
+### 参考开发环境
 
-```bash
-===test_1===
-res: TextBlock[BoxPointsLen(4), BoxScore(0.883992), AngleIndex(0), AngleScore(0.99999976), Text(后续可能会将他作为crate发布，因为目前只是研发在Rust调用PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。), TextScore(0.9849159)]TextBlock[BoxPointsLen(4), BoxScore(0.85958225), AngleIndex(0), AngleScore(0.89264715), Text(一个尝试通过 Rust 调用 PaddleOCR 实现图片文字提取的测试程序。), TextScore(0.9740863)]TextBlock[BoxPointsLen(4), BoxScore(0.85514736), AngleIndex(0), AngleScore(0.9953818), Text(paddle-ocr-rs), TextScore(0.99551016)]
-===test_2===
-res: TextBlock[BoxPointsLen(4), BoxScore(0.9588546), AngleIndex(0), AngleScore(0.99999917), Text(母婴用品连锁), TextScore(0.9974614)]
-```
+| 依赖       | 版本号                        |
+| ---------- | ----------------------------- |
+| rustc      | 1.84.1 (e71f9a9a9 2025-01-27) |
+| cargo      | 1.84.1 (66221abde 2024-11-19) |
+| OS         | Windows 11 24H2               |
+| Paddle OCR | 4                             |
 
-#### 开发环境
-
-| 依赖 | 版本号 |
-|------------|-----------------------------|
-| rustc | 1.84.1 (e71f9a9a9 2025-01-27) |
-| cargo | 1.84.1 (66221abde 2024-11-19) |
-| OpenCV | 4.11.0 |
-| OS | Windows 11 24H2 |
-| Paddle OCR | 4 |
-
-#### 模型来源
+### 模型来源
 
 [RapidOCR Docs](https://rapidai.github.io/RapidOCRDocs/main/model_list/)
 
-#### 相关事项
+### 相关事项
 
-项目可以认为是 RapidOCR 的 Rust 实现，代码参考自 RapidOCR 的 C++ 实现。
+代码参考自 [RapidOcrOnnx](https://github.com/RapidAI/RapidOcrOnnx)，已使用 image 和 imageproc 代替 OpenCV 进行图片相关的实现。
 
-C++ 实现：[RapidOcrOnnx](https://github.com/RapidAI/RapidOcrOnnx)
-
-有个比较坑的点是项目用到了 OpenCV 做图片相关的处理，所以需要提供 OpenCV 环境。
-
-OpenCV 的 crate 是 [opencv-rust](https://github.com/twistedfall/opencv-rust)，环境依赖安装在 README 上有介绍：[INSTALL.md](https://github.com/twistedfall/opencv-rust/blob/master/INSTALL.md)
-
-注意得把名为 opencv_worldxxxx.dll 的 dll 放在 ./target/debug 目录下。opencv-rust 的文档都有提及，在此就不赘叙了。
-
-#### 效果展示
+### 效果展示
 
 #### test_1.png
 
-![test_1](../test/test_1.png)
+![test_1](./test_images/test_1.png)
 
 ```bash
-TextBlock[BoxPointsLen(4), BoxScore(0.883992), AngleIndex(0), AngleScore(0.99999976), Text(后续可能会将他作为crate发布，因为目前只是研发在Rust调用PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。), TextScore(0.9849159)]TextBlock[BoxPointsLen(4), BoxScore(0.85958225), AngleIndex(0), AngleScore(0.89264715), Text(一个尝试通过 Rust 调用 PaddleOCR 实现图片文字提取的测试程序。), TextScore(0.9740863)]TextBlock[BoxPointsLen(4), BoxScore(0.85514736), AngleIndex(0), AngleScore(0.9953818), Text(paddle-ocr-rs), TextScore(0.99551016)]
+text: 使用Rust 通过ONNX Runtime 调用 Paddle OCR 模型进行图片文字识别。 score: 0.95269924
+text: paddle-ocr-rs score: 0.9979071
 ```
 
 #### test_2.png
 
-![test_2](../test/test_2.png)
+![test_2](./test_images/test_2.png)
 
 ```bash
-TextBlock[BoxPointsLen(4), BoxScore(0.9570672), AngleIndex(0), AngleScore(0.9999999), Text(母婴用品连锁), TextScore(0.99932665)]
+text: 母婴用品连锁 score: 0.99713486
 ```
+
+#### test_3.png
+
+![test_3](./test_images/test_3.png)
 
 #### 输出预览
 
 ```bash
-===test_1===
-paddle-ocr-rs
-一个尝试通过 Rust 调用 PaddleOCR 实现图片文字提取的测试程序。
-后续可能会将他作为crate发布，因为目前只是研发在Rust调用PaddleOCR，代码没有整理的很好。实际项目使用后有反馈再做打算。
-===test_2===
-母婴用品连锁
+text: salta sobre o cao preguicoso. score: 0.9794339
+text: perezoso. A raposa marrom rapida score: 0.9970329
+text: marron rapido salta sobre el perro score: 0.9995695
+text: salta sopra il cane pigro. El zorro score: 0.99923337
+text: paresseux. La volpe marrone rapida score: 0.9991456
+text: 《rapide> saute par-dessus le chien score: 0.9685502
+text: uber den faulen Hund. Le renard brun score: 0.988613
+text: Der ,schnelle" braune Fuchs springt score: 0.97560924
+text: from aspammer@website.com is spam. score: 0.98167914
+text: & duck/goose, as 12.5% of E-mail score: 0.98472834
+text: Over the $43,456.78 <lazy> #90 dog score: 0.9847551
+text: The (quick) [brown] {fox} jumps! score: 0.98300403
 ```
-

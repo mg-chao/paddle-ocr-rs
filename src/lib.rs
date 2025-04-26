@@ -24,12 +24,22 @@ mod tests {
 
         println!("===test_1===");
         let res =
-            ocr.detect_from_path("./test/test_1.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
-        println!("res: {}", res);
+            ocr.detect_from_path("./docs/test_images/test_1.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+        res.text_blocks.iter().for_each(|item| {
+            println!("text: {} score: {}", item.text, item.text_score);
+        });
         println!("===test_2===");
         let res =
-            ocr.detect_from_path("./test/test_2.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
-        println!("res: {}", res);
+            ocr.detect_from_path("./docs/test_images/test_2.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+        res.text_blocks.iter().for_each(|item| {
+            println!("text: {} score: {}", item.text, item.text_score);
+        });
+        println!("===test_3===");
+        let res =
+            ocr.detect_from_path("./docs/test_images/test_3.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+        res.text_blocks.iter().for_each(|item| {
+            println!("text: {} score: {}", item.text, item.text_score);
+        });
 
         Ok(())
     }
