@@ -1,8 +1,9 @@
 use crate::{
     ocr_error::OcrError,
-    ocr_result::{self, TextBox},
+    ocr_result::{self, TextBox, TextBoxV2},
     ocr_utils::OcrUtils,
     scale_param::ScaleParam,
+    scale_param_v2::ScaleParamV2,
 };
 use geo_clipper::{Clipper, EndType, JoinType};
 use geo_types::{Coord, LineString, Polygon};
@@ -91,6 +92,50 @@ impl DbNet {
             src_resize.rows(),
             src_resize.cols(),
             scale,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+        )?;
+
+        Ok(text_boxes)
+    }
+
+    pub fn get_text_boxes_v2(
+        &self,
+        img_src: &mut image::RgbImage,
+        scale: &ScaleParamV2,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+    ) -> Result<Vec<TextBoxV2>, OcrError> {
+        let Some(session) = &self.session else {
+            return Err(OcrError::SessionNotInitialized);
+        };
+
+        let src_resize = image::imageops::resize(
+            img_src,
+            scale.dst_width as u32,
+            scale.dst_height as u32,
+            image::imageops::FilterType::Triangle,
+        );
+
+        let input_tensors =
+            OcrUtils::substract_mean_normalize_v2(&src_resize, &MEAN_VALUES, &NORM_VALUES);
+
+        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
+
+        let text_boxes = Self::get_text_boxes_core_v2(
+            &outputs,
+            src_resize.height(),
+            src_resize.width(),
+            &ScaleParamV2::new(
+                scale.src_width,
+                scale.src_height,
+                scale.dst_width,
+                scale.dst_height,
+                scale.scale_width,
+                scale.scale_height,
+            ),
             box_score_thresh,
             box_thresh,
             un_clip_ratio,
@@ -232,6 +277,106 @@ impl DbNet {
         Ok(rs_boxes)
     }
 
+    fn get_text_boxes_core_v2(
+        output_tensor: &SessionOutputs,
+        rows: u32,
+        cols: u32,
+        s: &ScaleParamV2,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+    ) -> Result<Vec<TextBoxV2>, OcrError> {
+        let max_side_thresh = 3.0;
+        let mut rs_boxes = Vec::new();
+
+        let (_, red_data) = output_tensor.iter().next().unwrap();
+
+        let pred_data: Vec<f32> = red_data
+            .try_extract_tensor::<f32>()?
+            .iter()
+            .map(|&x| x)
+            .collect();
+
+        let cbuf_data: Vec<u8> = pred_data
+            .iter()
+            .map(|pixel| (pixel * 255.0) as u8)
+            .collect();
+
+        let mut pred_img: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
+            image::ImageBuffer::from_vec(cols, rows, pred_data).unwrap();
+
+        let cbuf_img = image::GrayImage::from_vec(cols, rows, cbuf_data).unwrap();
+
+        let threshold_img = imageproc::contrast::threshold(
+            &cbuf_img,
+            (box_thresh * 255.0) as u8,
+            imageproc::contrast::ThresholdType::Binary,
+        );
+
+        let dilate_img = imageproc::morphology::dilate(
+            &threshold_img,
+            imageproc::distance_transform::Norm::LInf,
+            1,
+        );
+
+        let img_contours: Vec<imageproc::contours::Contour<u32>> =
+            imageproc::contours::find_contours(&dilate_img);
+
+        for contour in img_contours {
+            if contour.points.len() <= 2 {
+                continue;
+            }
+
+            let mut max_side = 0.0;
+            let min_box = Self::get_mini_box_v2(&contour.points, &mut max_side)?;
+            if max_side < max_side_thresh {
+                continue;
+            }
+
+            let score = Self::get_score_v2(&contour, &mut pred_img)?;
+            if score < box_score_thresh {
+                continue;
+            }
+
+            let clip_box = Self::unclip_v2(&min_box, un_clip_ratio)?;
+            if clip_box.is_empty() {
+                continue;
+            }
+
+            let mut clip_contour = Vec::new();
+            for point in &clip_box {
+                clip_contour.push(*point);
+            }
+
+            let mut max_side_clip = 0.0;
+            let clip_min_box = Self::get_mini_box_v2(&clip_contour, &mut max_side_clip)?;
+            if max_side_clip < max_side_thresh + 2.0 {
+                continue;
+            }
+
+            let mut final_points = Vec::new();
+            for item in clip_min_box {
+                let x = (item.x / s.scale_width) as u32;
+                let ptx = x.max(0).min(s.src_width);
+
+                let y = (item.y / s.scale_height) as u32;
+                let pty = y.max(0).min(s.src_height);
+
+                final_points.push(ocr_result::PointV2 { x: ptx, y: pty });
+            }
+
+            let text_box = TextBoxV2 {
+                score: score as f32,
+                points: final_points,
+            };
+
+            rs_boxes.push(text_box);
+        }
+
+        rs_boxes.reverse();
+        Ok(rs_boxes)
+    }
+
     fn get_mini_box(
         contour: &Vector<Point>,
         min_edge_size: &mut f32,
@@ -279,6 +424,65 @@ impl DbNet {
         box_points.push(the_points[index_2]);
         box_points.push(the_points[index_3]);
         box_points.push(the_points[index_4]);
+
+        Ok(box_points)
+    }
+
+    fn get_mini_box_v2(
+        contour_points: &Vec<imageproc::point::Point<u32>>,
+        min_edge_size: &mut f32,
+    ) -> Result<Vec<imageproc::point::Point<f32>>, OcrError> {
+        let rect = imageproc::geometry::min_area_rect(&contour_points);
+
+        let mut rect_points: Vec<imageproc::point::Point<f32>> = rect
+            .iter()
+            .map(|p| imageproc::point::Point::new(p.x as f32, p.y as f32))
+            .collect();
+
+        let width = ((rect_points[0].x - rect_points[1].x).powi(2)
+            + (rect_points[0].y - rect_points[1].y).powi(2))
+        .sqrt();
+        let height = ((rect_points[1].x - rect_points[2].x).powi(2)
+            + (rect_points[1].y - rect_points[2].y).powi(2))
+        .sqrt();
+
+        *min_edge_size = width.min(height);
+
+        rect_points.sort_by(|a, b| {
+            if a.x > b.x {
+                return Ordering::Greater;
+            }
+            if a.x == b.x {
+                return Ordering::Equal;
+            }
+            Ordering::Less
+        });
+
+        let mut box_points = Vec::new();
+        let index_1;
+        let index_4;
+        if rect_points[1].y > rect_points[0].y {
+            index_1 = 0;
+            index_4 = 1;
+        } else {
+            index_1 = 1;
+            index_4 = 0;
+        }
+
+        let index_2;
+        let index_3;
+        if rect_points[3].y > rect_points[2].y {
+            index_2 = 2;
+            index_3 = 3;
+        } else {
+            index_2 = 3;
+            index_3 = 2;
+        }
+
+        box_points.push(rect_points[index_1]);
+        box_points.push(rect_points[index_2]);
+        box_points.push(rect_points[index_3]);
+        box_points.push(rect_points[index_4]);
 
         Ok(box_points)
     }
@@ -356,6 +560,70 @@ impl DbNet {
         Ok(mean[0])
     }
 
+    fn get_score_v2(
+        contour: &imageproc::contours::Contour<u32>,
+        f_map_mat: &mut image::ImageBuffer<image::Luma<f32>, Vec<f32>>,
+    ) -> Result<f32, OcrError> {
+        // 初始化边界值
+        let mut xmin = u32::MAX;
+        let mut xmax = u32::MIN;
+        let mut ymin = u32::MAX;
+        let mut ymax = u32::MIN;
+
+        // 找到轮廓的边界框
+        for point in contour.points.iter() {
+            let x = point.x as u32;
+            let y = point.y as u32;
+
+            if x < xmin {
+                xmin = x;
+            }
+            if x > xmax {
+                xmax = x;
+            }
+            if y < ymin {
+                ymin = y;
+            }
+            if y > ymax {
+                ymax = y;
+            }
+        }
+
+        let width = f_map_mat.width();
+        let height = f_map_mat.height();
+
+        xmin = xmin.max(0).min(width - 1);
+        xmax = xmax.max(0).min(width - 1);
+        ymin = ymin.max(0).min(height - 1);
+        ymax = ymax.max(0).min(height - 1);
+
+        let roi_width = xmax - xmin + 1;
+        let roi_height = ymax - ymin + 1;
+
+        if roi_width <= 0 || roi_height <= 0 {
+            return Ok(0.0);
+        }
+
+        let mut mask = image::GrayImage::new(roi_width, roi_height);
+
+        let mut pts = Vec::<imageproc::point::Point<i32>>::new();
+        for point in contour.points.iter() {
+            pts.push(imageproc::point::Point::new(
+                (point.x - xmin) as i32,
+                (point.y - ymin) as i32,
+            ));
+        }
+
+        imageproc::drawing::draw_polygon_mut(&mut mask, pts.as_slice(), image::Luma([255]));
+
+        let cropped_img =
+            image::imageops::crop(f_map_mat, xmin, ymin, roi_width, roi_height).to_image();
+
+        let mean = OcrUtils::calculate_mean_with_mask(&cropped_img, &mask);
+
+        Ok(mean)
+    }
+
     fn unclip(box_points: &[Point2f], unclip_ratio: f32) -> Result<Vec<Point>, OcrError> {
         let mut points_arr = Vector::<Point2f>::new();
         for pt in box_points {
@@ -402,6 +670,58 @@ impl DbNet {
         Ok(ret_pts)
     }
 
+    fn unclip_v2(
+        box_points: &[imageproc::point::Point<f32>],
+        unclip_ratio: f32,
+    ) -> Result<Vec<imageproc::point::Point<u32>>, OcrError> {
+        let points_arr = box_points.to_vec();
+
+        let clip_rect_width = ((points_arr[0].x - points_arr[1].x).powi(2)
+            + (points_arr[0].y - points_arr[1].y).powi(2))
+        .sqrt();
+        let clip_rect_height = ((points_arr[1].x - points_arr[2].x).powi(2)
+            + (points_arr[1].y - points_arr[2].y).powi(2))
+        .sqrt();
+
+        if clip_rect_height < 1.001 && clip_rect_width < 1.001 {
+            return Ok(Vec::new());
+        }
+
+        let mut the_cliper_pts = Vec::new();
+        for pt in box_points {
+            let a1 = Coord {
+                x: pt.x as f64,
+                y: pt.y as f64,
+            };
+            the_cliper_pts.push(a1);
+        }
+
+        let area = Self::signed_polygon_area_v2(box_points).abs();
+        let length = Self::length_of_points_v2(box_points);
+        let distance = area * unclip_ratio as f32 / length as f32;
+
+        let co = Polygon::new(LineString::new(the_cliper_pts), vec![]);
+        let solution = co
+            .offset(
+                distance as f64,
+                JoinType::Round(2.0),
+                EndType::ClosedPolygon,
+                1.0,
+            )
+            .0;
+
+        if solution.len() == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut ret_pts = Vec::new();
+        for ip in solution.first().unwrap().exterior().points() {
+            ret_pts.push(imageproc::point::Point::new(ip.x() as u32, ip.y() as u32));
+        }
+
+        Ok(ret_pts)
+    }
+
     fn signed_polygon_area(points: &[Point2f]) -> f32 {
         let num_points = points.len();
         let mut pts = Vec::with_capacity(num_points + 1);
@@ -416,7 +736,50 @@ impl DbNet {
         area
     }
 
+    fn signed_polygon_area_v2(points: &[imageproc::point::Point<f32>]) -> f32 {
+        let num_points = points.len();
+        let mut pts = Vec::with_capacity(num_points + 1);
+        pts.extend_from_slice(points);
+        pts.push(points[0]);
+
+        let mut area = 0.0;
+        for i in 0..num_points {
+            area += (pts[i + 1].x - pts[i].x) * (pts[i + 1].y + pts[i].y) / 2.0;
+        }
+
+        area
+    }
+
     fn length_of_points(box_points: &[Point2f]) -> f64 {
+        if box_points.is_empty() {
+            return 0.0;
+        }
+
+        let mut length = 0.0;
+        let pt = box_points[0];
+        let mut x0 = pt.x as f64;
+        let mut y0 = pt.y as f64;
+
+        let mut box_with_first = Vec::from(box_points);
+        box_with_first.push(pt);
+
+        for idx in 1..box_with_first.len() {
+            let pts = box_with_first[idx];
+            let x1 = pts.x as f64;
+            let y1 = pts.y as f64;
+            let dx = x1 - x0;
+            let dy = y1 - y0;
+
+            length += (dx * dx + dy * dy).sqrt();
+
+            x0 = x1;
+            y0 = y1;
+        }
+
+        length
+    }
+
+    fn length_of_points_v2(box_points: &[imageproc::point::Point<f32>]) -> f64 {
         if box_points.is_empty() {
             return 0.0;
         }

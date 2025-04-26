@@ -9,9 +9,10 @@ use crate::{
     crnn_net::CrnnNet,
     db_net::DbNet,
     ocr_error::OcrError,
-    ocr_result::{OcrResult, TextBlock},
+    ocr_result::{OcrResult, OcrResultV2, Point, PointV2, TextBlock, TextBlockV2, TextBox, TextBoxV2},
     ocr_utils::OcrUtils,
     scale_param::ScaleParam,
+    scale_param_v2::ScaleParamV2,
 };
 
 #[derive(Debug)]
@@ -79,6 +80,41 @@ impl OcrLite {
         )
     }
 
+    pub fn detect_v2(
+        &self,
+        img_src: &image::RgbImage,
+        padding: u32,
+        max_side_len: u32,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+        do_angle: bool,
+        most_angle: bool,
+    ) -> Result<OcrResultV2, OcrError> {
+        let origin_max_side = img_src.width().max(img_src.height());
+        let mut resize;
+        if max_side_len <= 0 || max_side_len > origin_max_side {
+            resize = origin_max_side;
+        } else {
+            resize = max_side_len;
+        }
+        resize += 2 * padding;
+
+        let mut padding_src = OcrUtils::make_padding_v2(img_src, padding)?;
+
+        let scale = ScaleParamV2::get_scale_param(&padding_src, resize);
+
+        self.detect_once_v2(
+            &mut padding_src,
+            &scale,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+            do_angle,
+            most_angle,
+        )
+    }
+
     pub fn detect_from_path(
         &self,
         img_path: &str,
@@ -96,6 +132,31 @@ impl OcrLite {
             &src,
             padding,
             max_side_len,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+            do_angle,
+            most_angle,
+        )
+    }
+
+    pub fn detect_from_path_v2(
+        &self,
+        img_path: &str,
+        padding: u32,
+        max_side_len: u32,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+        do_angle: bool,
+        most_angle: bool,
+    ) -> Result<OcrResultV2, OcrError> {
+        let mut img_src = image::open(img_path)?.to_rgb8();
+
+        self.detect_v2(
+            &mut img_src,
+            padding as u32,
+            max_side_len as u32,
             box_score_thresh,
             box_thresh,
             un_clip_ratio,
@@ -149,5 +210,56 @@ impl OcrLite {
         }
 
         Ok(OcrResult { text_blocks })
+    }
+
+    fn detect_once_v2(
+        &self,
+        img_src: &mut image::RgbImage,
+        scale: &ScaleParamV2,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+        do_angle: bool,
+        most_angle: bool,
+    ) -> Result<OcrResultV2, OcrError> {
+        let text_boxes = self.db_net.get_text_boxes_v2(
+            img_src,
+            scale,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+        )?;
+
+        let mut part_images = OcrUtils::get_part_images_v2(img_src, &text_boxes);
+
+        let angles = self
+            .angle_net
+            .get_angles_v2(&part_images, do_angle, most_angle)?;
+
+        let mut rotated_images: Vec<image::RgbImage> = Vec::with_capacity(part_images.len());
+        for i in (0..angles.len()).rev() {
+            if let Some(mut img) = part_images.pop() {
+                if angles[i].index == 1 {
+                    OcrUtils::mat_rotate_clock_wise_180_v2(&mut img);
+                }
+                rotated_images.push(img);
+            }
+        }
+
+        let text_lines = self.crnn_net.get_text_lines_v2(&rotated_images)?;
+
+        let mut text_blocks = Vec::with_capacity(text_lines.len());
+        for i in 0..text_lines.len() {
+            text_blocks.push(TextBlockV2 {
+                box_points: text_boxes[i].points.clone(),
+                box_score: text_boxes[i].score,
+                angle_index: angles[i].index,
+                angle_score: angles[i].score,
+                text: text_lines[i].text.clone(),
+                text_score: text_lines[i].text_score,
+            });
+        }
+
+        Ok(OcrResultV2 { text_blocks })
     }
 }

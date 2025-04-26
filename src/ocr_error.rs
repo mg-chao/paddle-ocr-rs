@@ -9,5 +9,7 @@ pub enum OcrError {
     #[error("Io error")]
     Io(#[from] std::io::Error),
     #[error("Session not initialized")]
+    ImageError(#[from] image::ImageError),
+    #[error("Image error")]
     SessionNotInitialized,
 }

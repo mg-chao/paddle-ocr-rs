@@ -11,8 +11,8 @@ use crate::{ocr_error::OcrError, ocr_result::Angle, ocr_utils::OcrUtils};
 
 const MEAN_VALUES: [f32; 3] = [127.5, 127.5, 127.5];
 const NORM_VALUES: [f32; 3] = [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5];
-const ANGLE_DST_WIDTH: i32 = 192;
-const ANGLE_DST_HEIGHT: i32 = 48;
+const ANGLE_DST_WIDTH: u32 = 192;
+const ANGLE_DST_HEIGHT: u32 = 48;
 const ANGLE_COLS: usize = 2;
 
 #[derive(Debug)]
@@ -29,11 +29,7 @@ impl AngleNet {
         }
     }
 
-    pub fn init_model(
-        &mut self,
-        path: &str,
-        num_thread: usize,
-    ) -> Result<(), OcrError> {
+    pub fn init_model(&mut self, path: &str, num_thread: usize) -> Result<(), OcrError> {
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level2)?
             .with_intra_threads(num_thread)?
@@ -82,6 +78,36 @@ impl AngleNet {
         Ok(angles)
     }
 
+    pub fn get_angles_v2(
+        &self,
+        part_imgs: &[image::RgbImage],
+        do_angle: bool,
+        most_angle: bool,
+    ) -> Result<Vec<Angle>, OcrError> {
+        let mut angles = Vec::new();
+
+        if do_angle {
+            for img in part_imgs {
+                let angle = self.get_angle_v2(img)?;
+                angles.push(angle);
+            }
+        } else {
+            angles.extend(part_imgs.iter().map(|_| Angle::default()));
+        }
+
+        if do_angle && most_angle {
+            let sum: i32 = angles.iter().map(|x| x.index).sum();
+            let half_percent = angles.len() as f32 / 2.0;
+            let most_angle_index = if (sum as f32) < half_percent { 0 } else { 1 };
+
+            for angle in angles.iter_mut() {
+                angle.index = most_angle_index;
+            }
+        }
+
+        Ok(angles)
+    }
+
     fn get_angle(&self, src: &Mat) -> Result<Angle, OcrError> {
         let angle;
 
@@ -93,7 +119,7 @@ impl AngleNet {
         imgproc::resize(
             src,
             &mut angle_img,
-            Size::new(ANGLE_DST_WIDTH, ANGLE_DST_HEIGHT),
+            Size::new(ANGLE_DST_WIDTH as i32, ANGLE_DST_HEIGHT as i32),
             0.0,
             0.0,
             imgproc::INTER_LINEAR,
@@ -102,6 +128,31 @@ impl AngleNet {
 
         let input_tensors =
             OcrUtils::substract_mean_normalize(&angle_img, &MEAN_VALUES, &NORM_VALUES);
+
+        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
+
+        angle = self.score_to_angle(&outputs, ANGLE_COLS)?;
+
+        Ok(angle)
+    }
+
+    fn get_angle_v2(&self, img_src: &image::RgbImage) -> Result<Angle, OcrError> {
+        let angle;
+
+        let Some(session) = &self.session else {
+            return Err(OcrError::SessionNotInitialized);
+        };
+
+        let angle_img = image::imageops::resize(
+            img_src,
+            ANGLE_DST_WIDTH as u32,
+            ANGLE_DST_HEIGHT as u32,
+            image::imageops::FilterType::Triangle,
+        );
+     
+
+        let input_tensors =
+            OcrUtils::substract_mean_normalize_v2(&angle_img, &MEAN_VALUES, &NORM_VALUES);
 
         let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
 

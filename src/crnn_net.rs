@@ -12,7 +12,7 @@ use crate::ocr_error::OcrError;
 use crate::ocr_result::TextLine;
 use crate::ocr_utils::OcrUtils;
 
-const CRNN_DST_HEIGHT: i32 = 48;
+const CRNN_DST_HEIGHT: u32 = 48;
 const MEAN_VALUES: [f32; 3] = [127.5, 127.5, 127.5];
 const NORM_VALUES: [f32; 3] = [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5];
 
@@ -86,6 +86,20 @@ impl CrnnNet {
         Ok(text_lines)
     }
 
+    pub fn get_text_lines_v2(
+        &self,
+        part_imgs: &Vec<image::RgbImage>,
+    ) -> Result<Vec<TextLine>, OcrError> {
+        let mut text_lines = Vec::new();
+
+        for img in part_imgs {
+            let text_line = self.get_text_line_v2(img)?;
+            text_lines.push(text_line);
+        }
+
+        Ok(text_lines)
+    }
+
     fn get_text_line(&self, src: &Mat) -> Result<TextLine, OcrError> {
         let Some(session) = &self.session else {
             return Err(OcrError::SessionNotInitialized);
@@ -98,7 +112,7 @@ impl CrnnNet {
         cv::imgproc::resize(
             &src,
             &mut src_resize,
-            Size::new(dst_width, CRNN_DST_HEIGHT),
+            Size::new(dst_width, CRNN_DST_HEIGHT as i32),
             0.0,
             0.0,
             cv::imgproc::INTER_LINEAR,
@@ -107,6 +121,38 @@ impl CrnnNet {
 
         let input_tensors =
             OcrUtils::substract_mean_normalize(&src_resize, &MEAN_VALUES, &NORM_VALUES);
+
+        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
+
+        let (_, red_data) = outputs.iter().next().unwrap();
+
+        let src_data = red_data.try_extract_tensor::<f32>()?;
+
+        let dimensions = src_data.shape();
+        let height = dimensions[1];
+        let width = dimensions[2];
+        let src_data: Vec<f32> = src_data.iter().map(|&x| x).collect();
+
+        self.score_to_text_line(&src_data, height, width)
+    }
+
+    fn get_text_line_v2(&self, img_src: &image::RgbImage) -> Result<TextLine, OcrError> {
+        let Some(session) = &self.session else {
+            return Err(OcrError::SessionNotInitialized);
+        };
+
+        let scale = CRNN_DST_HEIGHT as f32 / img_src.height() as f32;
+        let dst_width = (img_src.width() as f32 * scale) as u32;
+
+        let src_resize = image::imageops::resize(
+            img_src,
+            dst_width as u32,
+            CRNN_DST_HEIGHT as u32,
+            image::imageops::FilterType::Triangle,
+        );
+
+        let input_tensors =
+            OcrUtils::substract_mean_normalize_v2(&src_resize, &MEAN_VALUES, &NORM_VALUES);
 
         let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
 
