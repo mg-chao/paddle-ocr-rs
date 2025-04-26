@@ -34,9 +34,11 @@ mod tests {
         res.text_blocks.iter().for_each(|item| {
             println!("text: {} score: {}", item.text, item.text_score);
         });
+
+        // 通过 image 读取图片
         println!("===test_3===");
-        let res =
-            ocr.detect_from_path("./docs/test_images/test_3.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+        let test_three_img = image::open("./docs/test_images/test_3.png").unwrap().to_rgb8();
+        let res = ocr.detect(&test_three_img, 50, 1024, 0.5, 0.3, 1.6, true, false)?;
         res.text_blocks.iter().for_each(|item| {
             println!("text: {} score: {}", item.text, item.text_score);
         });
