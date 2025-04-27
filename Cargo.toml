@@ -1,15 +1,17 @@
 [package]
 name = "paddle-ocr-rs"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 readme = "README.md"
 keywords = ["paddle", "ocr", "onnx"]
 license = "Apache-2.0"
-description = "A Rust implementation for text recognition in images using Paddle OCR models through ONNX Runtime."
+description = "Use Rust to call Paddle OCR models via ONNX Runtime for image text recognition."
 repository = "https://github.com/mg-chao/paddle-ocr-rs"
 authors = ["mg-chao <chao@mgchao.top>"]
 
 [dependencies]
+serde_json = "^1.0"
+serde = { version = "^1.0", features = ["derive"] }
 imageproc = "0.25"
 ndarray = "0.16"
 ort = { version = "2.0.0-rc.6", default-features = false, features = ["ndarray"] }

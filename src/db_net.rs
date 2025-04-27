@@ -195,7 +195,6 @@ impl DbNet {
             rs_boxes.push(text_box);
         }
 
-        rs_boxes.reverse();
         Ok(rs_boxes)
     }
 

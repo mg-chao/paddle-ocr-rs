@@ -33,7 +33,7 @@ impl ScaleParam {
         let mut dst_width;
         let mut dst_height;
 
-        let ratio = if src_width > src_height {
+        let ratio: f32 = if src_width > src_height {
             target_size as f32 / src_width as f32
         } else {
             target_size as f32 / src_height as f32
