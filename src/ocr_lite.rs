@@ -3,7 +3,7 @@
     crnn_net::CrnnNet,
     db_net::DbNet,
     ocr_error::OcrError,
-    ocr_result::{OcrResult, TextBlock},
+    ocr_result::{OcrResult, Point, TextBlock},
     ocr_utils::OcrUtils,
     scale_param::ScaleParam,
 };
@@ -65,6 +65,7 @@ impl OcrLite {
         self.detect_once(
             &mut padding_src,
             &scale,
+            padding,
             box_score_thresh,
             box_thresh,
             un_clip_ratio,
@@ -102,6 +103,7 @@ impl OcrLite {
         &self,
         img_src: &mut image::RgbImage,
         scale: &ScaleParam,
+        padding: u32,
         box_score_thresh: f32,
         box_thresh: f32,
         un_clip_ratio: f32,
@@ -123,6 +125,8 @@ impl OcrLite {
             .get_angles(&part_images, do_angle, most_angle)?;
 
         let mut rotated_images: Vec<image::RgbImage> = Vec::with_capacity(part_images.len());
+        // 用 pop 转移所有权，反转以输出正确结果
+        part_images.reverse();
         for i in (0..angles.len()).rev() {
             if let Some(mut img) = part_images.pop() {
                 if angles[i].index == 1 {
@@ -137,7 +141,14 @@ impl OcrLite {
         let mut text_blocks = Vec::with_capacity(text_lines.len());
         for i in 0..text_lines.len() {
             text_blocks.push(TextBlock {
-                box_points: text_boxes[i].points.clone(),
+                box_points: text_boxes[i]
+                    .points
+                    .iter()
+                    .map(|p| Point {
+                        x: ((p.x as f32) - padding as f32) as u32,
+                        y: ((p.y as f32) - padding as f32) as u32,
+                    })
+                    .collect(),
                 box_score: text_boxes[i].score,
                 angle_index: angles[i].index,
                 angle_score: angles[i].score,

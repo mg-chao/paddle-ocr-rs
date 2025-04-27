@@ -1,12 +1,14 @@
 use std::fmt::{self, Write};
 
-#[derive(Debug, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Point {
     pub x: u32,
     pub y: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TextBox {
     pub points: Vec<Point>,
     pub score: f32,
@@ -67,7 +69,7 @@ impl fmt::Display for TextLine {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TextBlock {
     pub box_points: Vec<Point>,
     pub box_score: f32,
@@ -79,7 +81,7 @@ pub struct TextBlock {
     pub text_score: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OcrResult {
     pub text_blocks: Vec<TextBlock>,
 }
