@@ -1,4 +1,4 @@
-[简体中文](./docs/README_zh-Hans.md)
+[English](./README.md)
 
 ## paddle-ocr-rs
 
@@ -32,7 +32,7 @@ fn run_test() -> Result<(), OcrError> {
         println!("text: {} score: {}", item.text, item.text_score);
     });
 
-   // 通过 image 读取图片
+   // Read image through image crate
     println!("===test_3===");
     let test_three_img = image::open("./docs/test_images/test_3.png").unwrap().to_rgb8();
     let res = ocr.detect(&test_three_img, 50, 1024, 0.5, 0.3, 1.6, true, false)?;
@@ -53,6 +53,12 @@ fn run_test() -> Result<(), OcrError> {
 | OS         | Windows 11 24H2              |
 | Paddle OCR | 4                            |
 
+### Documentation
+
+[Error Handling](/docs/error/index.md)
+
+[Static Linking Reference](/docs/staticLinking/index.md)
+
 ### Model Source
 
 [RapidOCR Docs](https://rapidai.github.io/RapidOCRDocs/main/model_list/)
@@ -68,7 +74,7 @@ The code is referenced from [RapidOcrOnnx](https://github.com/RapidAI/RapidOcrOn
 ![test_1](/docs/test_images/test_1.png)
 
 ```bash
-text: 使用Rust 通过ONNX Runtime 调用 Paddle OCR 模型进行图片文字识别。 score: 0.95269924
+text: Use Rust to call Paddle OCR models via ONNX Runtime for image text recognition. score: 0.95269924
 text: paddle-ocr-rs score: 0.9979071
 ```
 
@@ -77,7 +83,7 @@ text: paddle-ocr-rs score: 0.9979071
 ![test_2](/docs/test_images/test_2.png)
 
 ```bash
-text: 母婴用品连锁 score: 0.99713486
+text: Mother and Baby Products Chain score: 0.99713486
 ```
 
 #### test_3.png

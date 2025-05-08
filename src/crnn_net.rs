@@ -1,13 +1,10 @@
 use ort::inputs;
-use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::ocr_error::OcrError;
-use crate::ocr_result::TextLine;
-use crate::ocr_utils::OcrUtils;
+use crate::{base_net::BaseNet, ocr_error::OcrError, ocr_result::TextLine, ocr_utils::OcrUtils};
 
 const CRNN_DST_HEIGHT: u32 = 48;
 const MEAN_VALUES: [f32; 3] = [127.5, 127.5, 127.5];
@@ -20,8 +17,8 @@ pub struct CrnnNet {
     input_names: Vec<String>,
 }
 
-impl CrnnNet {
-    pub fn new() -> Self {
+impl BaseNet for CrnnNet {
+    fn new() -> Self {
         Self {
             session: None,
             keys: Vec::new(),
@@ -29,28 +26,38 @@ impl CrnnNet {
         }
     }
 
+    fn set_input_names(&mut self, input_names: Vec<String>) {
+        self.input_names = input_names;
+    }
+
+    fn set_session(&mut self, session: Option<Session>) {
+        self.session = session;
+    }
+}
+
+impl CrnnNet {
     pub fn init_model(
         &mut self,
         path: &str,
         keys_path: &str,
         num_thread: usize,
     ) -> Result<(), OcrError> {
-        let session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level2)?
-            .with_intra_threads(num_thread)?
-            .with_inter_threads(num_thread)?
-            .commit_from_file(path)?;
-
-        let input_names: Vec<String> = session
-            .inputs
-            .iter()
-            .map(|input| input.name.clone())
-            .collect();
-
-        self.input_names = input_names;
-        self.session = Some(session);
+        BaseNet::init_model(self, path, num_thread)?;
 
         self.keys = self.get_keys(keys_path)?;
+
+        Ok(())
+    }
+
+    pub fn init_model_from_memory(
+        &mut self,
+        model_bytes: &[u8],
+        keys_bytes: &[u8],
+        num_thread: usize,
+    ) -> Result<(), OcrError> {
+        BaseNet::init_model_from_memory(self, model_bytes, num_thread)?;
+
+        self.keys = self.get_keys_from_memory(keys_bytes)?;
 
         Ok(())
     }
@@ -62,6 +69,22 @@ impl CrnnNet {
 
         let file = File::open(path)?;
         let reader = BufReader::new(file);
+
+        for line in reader.lines() {
+            keys.push(line?);
+        }
+
+        keys.push(" ".to_string());
+
+        Ok(keys)
+    }
+
+    fn get_keys_from_memory(&mut self, keys_bytes: &[u8]) -> Result<Vec<String>, OcrError> {
+        let mut keys = Vec::new();
+
+        keys.push("#".to_string());
+
+        let reader = BufReader::new(keys_bytes);
 
         for line in reader.lines() {
             keys.push(line?);
