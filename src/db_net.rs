@@ -1,4 +1,5 @@
 use crate::{
+    base_net::BaseNet,
     ocr_error::OcrError,
     ocr_result::{self, TextBox},
     ocr_utils::OcrUtils,
@@ -6,7 +7,7 @@ use crate::{
 };
 use geo_clipper::{Clipper, EndType, JoinType};
 use geo_types::{Coord, LineString, Polygon};
-use ort::session::{builder::GraphOptimizationLevel, Session};
+use ort::session::Session;
 use ort::{inputs, session::SessionOutputs};
 use std::cmp::Ordering;
 
@@ -27,34 +28,24 @@ pub struct DbNet {
     input_names: Vec<String>,
 }
 
-impl DbNet {
-    pub fn new() -> Self {
+impl BaseNet for DbNet {
+    fn new() -> Self {
         Self {
             session: None,
             input_names: Vec::new(),
         }
     }
 
-    pub fn init_model(&mut self, path: &str, num_thread: usize) -> Result<(), OcrError> {
-        let session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level2)?
-            .with_intra_threads(num_thread)?
-            .with_inter_threads(num_thread)?
-            .commit_from_file(path)?;
-
-        // Get input names
-        let input_names: Vec<String> = session
-            .inputs
-            .iter()
-            .map(|input| input.name.clone())
-            .collect();
-
+    fn set_input_names(&mut self, input_names: Vec<String>) {
         self.input_names = input_names;
-        self.session = Some(session);
-
-        Ok(())
     }
 
+    fn set_session(&mut self, session: Option<Session>) {
+        self.session = session;
+    }
+}
+
+impl DbNet {
     pub fn get_text_boxes(
         &self,
         img_src: &mut image::RgbImage,

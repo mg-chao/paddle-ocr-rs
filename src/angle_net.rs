@@ -1,9 +1,9 @@
 use ort::{
     inputs,
-    session::{builder::GraphOptimizationLevel, Session, SessionOutputs},
+    session::{Session, SessionOutputs},
 };
 
-use crate::{ocr_error::OcrError, ocr_result::Angle, ocr_utils::OcrUtils};
+use crate::{base_net::BaseNet, ocr_error::OcrError, ocr_result::Angle, ocr_utils::OcrUtils};
 
 const MEAN_VALUES: [f32; 3] = [127.5, 127.5, 127.5];
 const NORM_VALUES: [f32; 3] = [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5];
@@ -17,33 +17,24 @@ pub struct AngleNet {
     input_names: Vec<String>,
 }
 
-impl AngleNet {
-    pub fn new() -> Self {
+impl BaseNet for AngleNet {
+    fn new() -> Self {
         Self {
             session: None,
             input_names: Vec::new(),
         }
     }
 
-    pub fn init_model(&mut self, path: &str, num_thread: usize) -> Result<(), OcrError> {
-        let session = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level2)?
-            .with_intra_threads(num_thread)?
-            .with_inter_threads(num_thread)?
-            .commit_from_file(path)?;
-
-        let input_names: Vec<String> = session
-            .inputs
-            .iter()
-            .map(|input| input.name.clone())
-            .collect();
-
+    fn set_input_names(&mut self, input_names: Vec<String>) {
         self.input_names = input_names;
-        self.session = Some(session);
-
-        Ok(())
     }
 
+    fn set_session(&mut self, session: Option<Session>) {
+        self.session = session;
+    }
+}
+
+impl AngleNet {
     pub fn get_angles(
         &self,
         part_imgs: &[image::RgbImage],

@@ -1,5 +1,6 @@
 ﻿use crate::{
     angle_net::AngleNet,
+    base_net::BaseNet,
     crnn_net::CrnnNet,
     db_net::DbNet,
     ocr_error::OcrError,
@@ -35,6 +36,20 @@ impl OcrLite {
         self.db_net.init_model(det_path, num_thread)?;
         self.angle_net.init_model(cls_path, num_thread)?;
         self.crnn_net.init_model(rec_path, keys_path, num_thread)?;
+        Ok(())
+    }
+
+    pub fn init_models_from_memory(
+        &mut self,
+        det_bytes: &[u8],
+        cls_bytes: &[u8],
+        rec_bytes: &[u8],
+        keys_bytes: &[u8],
+        num_thread: usize,
+    ) -> Result<(), OcrError> {
+        self.db_net.init_model_from_memory(det_bytes, num_thread)?;
+        self.angle_net.init_model_from_memory(cls_bytes, num_thread)?;
+        self.crnn_net.init_model_from_memory(rec_bytes, keys_bytes, num_thread)?;
         Ok(())
     }
 

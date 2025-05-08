@@ -51,6 +51,12 @@ fn run_test() -> Result<(), OcrError> {
 | OS         | Windows 11 24H2               |
 | Paddle OCR | 4                             |
 
+### 文档
+
+[运行报错](/docs/error/index.md)
+
+[静态链接](/docs/staticLinking/index.md)
+
 ### 模型来源
 
 [RapidOCR Docs](https://rapidai.github.io/RapidOCRDocs/main/model_list/)

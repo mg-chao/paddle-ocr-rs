@@ -53,6 +53,12 @@ fn run_test() -> Result<(), OcrError> {
 | OS         | Windows 11 24H2              |
 | Paddle OCR | 4                            |
 
+### Documentation
+
+[Error Handling](/docs/error/index.md)
+
+[Static Linking Reference](/docs/staticLinking/index.md)
+
 ### Model Source
 
 [RapidOCR Docs](https://rapidai.github.io/RapidOCRDocs/main/model_list/)
