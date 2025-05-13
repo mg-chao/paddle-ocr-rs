@@ -62,7 +62,7 @@ impl OcrUtils {
     }
 
     pub fn get_part_images(
-        img_src: &mut image::RgbImage,
+        img_src: &image::RgbImage,
         text_boxes: &[TextBox],
     ) -> Vec<image::RgbImage> {
         text_boxes
@@ -72,7 +72,7 @@ impl OcrUtils {
     }
 
     pub fn get_rotate_crop_image(
-        img_src: &mut image::RgbImage,
+        img_src: &image::RgbImage,
         box_points: &[Point],
     ) -> image::RgbImage {
         let mut points = box_points.to_vec();

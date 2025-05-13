@@ -73,12 +73,12 @@ impl OcrLite {
         }
         resize += 2 * padding;
 
-        let mut padding_src = OcrUtils::make_padding(img_src, padding)?;
+        let padding_src = OcrUtils::make_padding(img_src, padding)?;
 
         let scale = ScaleParam::get_scale_param(&padding_src, resize);
 
         self.detect_once(
-            &mut padding_src,
+            &padding_src,
             &scale,
             padding,
             box_score_thresh,
@@ -100,10 +100,10 @@ impl OcrLite {
         do_angle: bool,
         most_angle: bool,
     ) -> Result<OcrResult, OcrError> {
-        let mut img_src = image::open(img_path)?.to_rgb8();
+        let img_src = image::open(img_path)?.to_rgb8();
 
         self.detect(
-            &mut img_src,
+            &img_src,
             padding as u32,
             max_side_len as u32,
             box_score_thresh,
@@ -116,7 +116,7 @@ impl OcrLite {
 
     fn detect_once(
         &self,
-        img_src: &mut image::RgbImage,
+        img_src: &image::RgbImage,
         scale: &ScaleParam,
         padding: u32,
         box_score_thresh: f32,
