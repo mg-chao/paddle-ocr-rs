@@ -48,7 +48,7 @@ impl BaseNet for DbNet {
 impl DbNet {
     pub fn get_text_boxes(
         &self,
-        img_src: &mut image::RgbImage,
+        img_src: &image::RgbImage,
         scale: &ScaleParam,
         box_score_thresh: f32,
         box_thresh: f32,
@@ -115,7 +115,7 @@ impl DbNet {
             .map(|pixel| (pixel * 255.0) as u8)
             .collect();
 
-        let mut pred_img: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
+        let pred_img: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
             image::ImageBuffer::from_vec(cols, rows, pred_data).unwrap();
 
         let cbuf_img = image::GrayImage::from_vec(cols, rows, cbuf_data).unwrap();
@@ -146,7 +146,7 @@ impl DbNet {
                 continue;
             }
 
-            let score = Self::get_score(&contour, &mut pred_img)?;
+            let score = Self::get_score(&contour, &pred_img)?;
             if score < box_score_thresh {
                 continue;
             }
@@ -250,7 +250,7 @@ impl DbNet {
 
     fn get_score(
         contour: &imageproc::contours::Contour<u32>,
-        f_map_mat: &mut image::ImageBuffer<image::Luma<f32>, Vec<f32>>,
+        f_map_mat: &image::ImageBuffer<image::Luma<f32>, Vec<f32>>,
     ) -> Result<f32, OcrError> {
         // 初始化边界值
         let mut xmin = u32::MAX;
@@ -305,7 +305,7 @@ impl DbNet {
         imageproc::drawing::draw_polygon_mut(&mut mask, pts.as_slice(), image::Luma([255]));
 
         let cropped_img =
-            image::imageops::crop(f_map_mat, xmin, ymin, roi_width, roi_height).to_image();
+            image::imageops::crop_imm(f_map_mat, xmin, ymin, roi_width, roi_height).to_image();
 
         let mean = OcrUtils::calculate_mean_with_mask(&cropped_img, &mask);
 

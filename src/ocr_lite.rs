@@ -73,12 +73,12 @@ impl OcrLite {
         }
         resize += 2 * padding;
 
-        let mut padding_src = OcrUtils::make_padding(img_src, padding)?;
+        let padding_src = OcrUtils::make_padding(img_src, padding)?;
 
         let scale = ScaleParam::get_scale_param(&padding_src, resize);
 
         self.detect_once(
-            &mut padding_src,
+            &padding_src,
             &scale,
             padding,
             box_score_thresh,
@@ -100,10 +100,10 @@ impl OcrLite {
         do_angle: bool,
         most_angle: bool,
     ) -> Result<OcrResult, OcrError> {
-        let mut img_src = image::open(img_path)?.to_rgb8();
+        let img_src = image::open(img_path)?.to_rgb8();
 
         self.detect(
-            &mut img_src,
+            &img_src,
             padding as u32,
             max_side_len as u32,
             box_score_thresh,
@@ -116,7 +116,7 @@ impl OcrLite {
 
     fn detect_once(
         &self,
-        img_src: &mut image::RgbImage,
+        img_src: &image::RgbImage,
         scale: &ScaleParam,
         padding: u32,
         box_score_thresh: f32,
@@ -133,22 +133,19 @@ impl OcrLite {
             un_clip_ratio,
         )?;
 
-        let mut part_images = OcrUtils::get_part_images(img_src, &text_boxes);
+        let part_images = OcrUtils::get_part_images(img_src, &text_boxes);
 
         let angles = self
             .angle_net
             .get_angles(&part_images, do_angle, most_angle)?;
 
         let mut rotated_images: Vec<image::RgbImage> = Vec::with_capacity(part_images.len());
-        // 用 pop 转移所有权，反转以输出正确结果
-        part_images.reverse();
-        for i in (0..angles.len()).rev() {
-            if let Some(mut img) = part_images.pop() {
-                if angles[i].index == 1 {
-                    OcrUtils::mat_rotate_clock_wise_180(&mut img);
-                }
-                rotated_images.push(img);
+
+        for (angle, mut part_image) in angles.iter().zip(part_images.into_iter()) {
+            if angle.index == 1 {
+                OcrUtils::mat_rotate_clock_wise_180(&mut part_image);
             }
+            rotated_images.push(part_image);
         }
 
         let text_lines = self.crnn_net.get_text_lines(&rotated_images)?;
