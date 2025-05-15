@@ -132,7 +132,7 @@ impl DbNet {
             1,
         );
 
-        let img_contours: Vec<imageproc::contours::Contour<u32>> =
+        let img_contours: Vec<imageproc::contours::Contour<i32>> =
             imageproc::contours::find_contours(&dilate_img);
 
         for contour in img_contours {
@@ -190,7 +190,7 @@ impl DbNet {
     }
 
     fn get_mini_box(
-        contour_points: &Vec<imageproc::point::Point<u32>>,
+        contour_points: &Vec<imageproc::point::Point<i32>>,
         min_edge_size: &mut f32,
     ) -> Result<Vec<imageproc::point::Point<f32>>, OcrError> {
         let rect = imageproc::geometry::min_area_rect(&contour_points);
@@ -249,19 +249,19 @@ impl DbNet {
     }
 
     fn get_score(
-        contour: &imageproc::contours::Contour<u32>,
+        contour: &imageproc::contours::Contour<i32>,
         f_map_mat: &image::ImageBuffer<image::Luma<f32>, Vec<f32>>,
     ) -> Result<f32, OcrError> {
         // 初始化边界值
-        let mut xmin = u32::MAX;
-        let mut xmax = u32::MIN;
-        let mut ymin = u32::MAX;
-        let mut ymax = u32::MIN;
+        let mut xmin = i32::MAX;
+        let mut xmax = i32::MIN;
+        let mut ymin = i32::MAX;
+        let mut ymax = i32::MIN;
 
         // 找到轮廓的边界框
         for point in contour.points.iter() {
-            let x = point.x as u32;
-            let y = point.y as u32;
+            let x = point.x;
+            let y = point.y;
 
             if x < xmin {
                 xmin = x;
@@ -277,8 +277,8 @@ impl DbNet {
             }
         }
 
-        let width = f_map_mat.width();
-        let height = f_map_mat.height();
+        let width = f_map_mat.width() as i32;
+        let height = f_map_mat.height() as i32;
 
         xmin = xmin.max(0).min(width - 1);
         xmax = xmax.max(0).min(width - 1);
@@ -292,7 +292,7 @@ impl DbNet {
             return Ok(0.0);
         }
 
-        let mut mask = image::GrayImage::new(roi_width, roi_height);
+        let mut mask = image::GrayImage::new(roi_width as u32, roi_height as u32);
 
         let mut pts = Vec::<imageproc::point::Point<i32>>::new();
         for point in contour.points.iter() {
@@ -304,8 +304,14 @@ impl DbNet {
 
         imageproc::drawing::draw_polygon_mut(&mut mask, pts.as_slice(), image::Luma([255]));
 
-        let cropped_img =
-            image::imageops::crop_imm(f_map_mat, xmin, ymin, roi_width, roi_height).to_image();
+        let cropped_img = image::imageops::crop_imm(
+            f_map_mat,
+            xmin as u32,
+            ymin as u32,
+            roi_width as u32,
+            roi_height as u32,
+        )
+        .to_image();
 
         let mean = OcrUtils::calculate_mean_with_mask(&cropped_img, &mask);
 
@@ -315,7 +321,7 @@ impl DbNet {
     fn unclip(
         box_points: &[imageproc::point::Point<f32>],
         unclip_ratio: f32,
-    ) -> Result<Vec<imageproc::point::Point<u32>>, OcrError> {
+    ) -> Result<Vec<imageproc::point::Point<i32>>, OcrError> {
         let points_arr = box_points.to_vec();
 
         let clip_rect_width = ((points_arr[0].x - points_arr[1].x).powi(2)
@@ -358,7 +364,7 @@ impl DbNet {
 
         let mut ret_pts = Vec::new();
         for ip in solution.first().unwrap().exterior().points() {
-            ret_pts.push(imageproc::point::Point::new(ip.x() as u32, ip.y() as u32));
+            ret_pts.push(imageproc::point::Point::new(ip.x() as i32, ip.y() as i32));
         }
 
         Ok(ret_pts)
