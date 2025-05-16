@@ -75,13 +75,7 @@ mod tests {
         let keys_bytes = fs::read("./models/ppocr_keys_v1.txt")?;
 
         let mut ocr = OcrLite::new();
-        ocr.init_models_from_memory(
-            &det_bytes,
-            &cls_bytes,
-            &rec_bytes,
-            &keys_bytes,
-            2,
-        )?;
+        ocr.init_models_from_memory(&det_bytes, &cls_bytes, &rec_bytes, &keys_bytes, 2)?;
 
         println!("===test_from_memory===");
         let test_img = image::open("./docs/test_images/test_1.png")
@@ -123,19 +117,46 @@ mod tests {
         let keys_bytes = keys_cursor.into_inner();
 
         let mut ocr = OcrLite::new();
-        ocr.init_models_from_memory(
-            &det_bytes,
-            &cls_bytes,
-            &rec_bytes,
-            &keys_bytes,
-            2,
-        )?;
+        ocr.init_models_from_memory(&det_bytes, &cls_bytes, &rec_bytes, &keys_bytes, 2)?;
 
         println!("===test_from_cursor===");
         let test_img = image::open("./docs/test_images/test_2.png")
             .unwrap()
             .to_rgb8();
         let res = ocr.detect(&test_img, 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+        res.text_blocks.iter().for_each(|item| {
+            println!("text: {} score: {}", item.text, item.text_score);
+        });
+
+        Ok(())
+    }
+
+    #[test]
+    fn run_test_angle_rollback() -> Result<(), OcrError> {
+        let mut ocr = OcrLite::new();
+        ocr.init_models(
+            "./models/ch_PP-OCRv4_det_infer.onnx",
+            "./models/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+            "./models/ch_PP-OCRv4_rec_infer.onnx",
+            "./models/ppocr_keys_v1.txt",
+            2,
+        )?;
+
+        println!("===test_angle_ori===");
+        let test_img = image::open("./docs/test_images/test_4.png")
+            .unwrap()
+            .to_rgb8();
+        let res = ocr.detect(&test_img, 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+        res.text_blocks.iter().for_each(|item| {
+            println!("text: {} score: {}", item.text, item.text_score);
+        });
+
+        println!("===test_angle_rollback===");
+        let test_img = image::open("./docs/test_images/test_4.png")
+            .unwrap()
+            .to_rgb8();
+        let res =
+            ocr.detect_angle_rollback(&test_img, 50, 1024, 0.5, 0.3, 1.6, true, false, 0.0)?;
         res.text_blocks.iter().for_each(|item| {
             println!("text: {} score: {}", item.text, item.text_score);
         });

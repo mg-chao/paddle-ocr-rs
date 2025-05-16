@@ -1,5 +1,6 @@
 use ort::inputs;
 use ort::session::Session;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -98,11 +99,20 @@ impl CrnnNet {
     pub fn get_text_lines(
         &self,
         part_imgs: &Vec<image::RgbImage>,
+        angle_rollback_records: &HashMap<usize, image::RgbImage>,
+        angle_rollback_threshold: f32,
     ) -> Result<Vec<TextLine>, OcrError> {
         let mut text_lines = Vec::new();
 
-        for img in part_imgs {
-            let text_line = self.get_text_line(img)?;
+        for (index, img) in part_imgs.iter().enumerate() {
+            let mut text_line = self.get_text_line(img)?;
+
+            if text_line.text_score.is_nan() || text_line.text_score < angle_rollback_threshold {
+                if let Some(angle_rollback_record) = angle_rollback_records.get(&index) {
+                    text_line = self.get_text_line(angle_rollback_record)?;
+                }
+            }
+
             text_lines.push(text_line);
         }
 
