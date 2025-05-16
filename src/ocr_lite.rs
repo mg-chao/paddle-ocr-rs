@@ -1,4 +1,8 @@
-﻿use crate::{
+﻿use std::collections::HashMap;
+
+use image::ImageBuffer;
+
+use crate::{
     angle_net::AngleNet,
     base_net::BaseNet,
     crnn_net::CrnnNet,
@@ -48,12 +52,14 @@ impl OcrLite {
         num_thread: usize,
     ) -> Result<(), OcrError> {
         self.db_net.init_model_from_memory(det_bytes, num_thread)?;
-        self.angle_net.init_model_from_memory(cls_bytes, num_thread)?;
-        self.crnn_net.init_model_from_memory(rec_bytes, keys_bytes, num_thread)?;
+        self.angle_net
+            .init_model_from_memory(cls_bytes, num_thread)?;
+        self.crnn_net
+            .init_model_from_memory(rec_bytes, keys_bytes, num_thread)?;
         Ok(())
     }
 
-    pub fn detect(
+    fn detect_base(
         &self,
         img_src: &image::RgbImage,
         padding: u32,
@@ -63,6 +69,8 @@ impl OcrLite {
         un_clip_ratio: f32,
         do_angle: bool,
         most_angle: bool,
+        angle_rollback: bool,
+        angle_rollback_threshold: f32,
     ) -> Result<OcrResult, OcrError> {
         let origin_max_side = img_src.width().max(img_src.height());
         let mut resize;
@@ -86,6 +94,83 @@ impl OcrLite {
             un_clip_ratio,
             do_angle,
             most_angle,
+            angle_rollback,
+            angle_rollback_threshold,
+        )
+    }
+
+    /// 检测图片
+    ///
+    /// # Arguments
+    ///
+    /// - `&self` (`undefined`) - Describe this parameter.
+    /// - `img_src` (`&image`) - 图片
+    /// - `padding` (`u32`) - 变换图片时添加边框的宽度（提高检测效果）
+    /// - `max_side_len` (`u32`) - 变换图片后图片宽和高保留的最大边长（超出该尺寸的图片将缩小）
+    /// - `box_score_thresh` (`f32`) - 检测存在文本的区域的分值阈值
+    /// - `do_angle` (`bool`) - 是否进行角度检测
+    /// ```
+    pub fn detect(
+        &self,
+        img_src: &image::RgbImage,
+        padding: u32,
+        max_side_len: u32,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+        do_angle: bool,
+        most_angle: bool,
+    ) -> Result<OcrResult, OcrError> {
+        self.detect_base(
+            img_src,
+            padding,
+            max_side_len,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+            do_angle,
+            most_angle,
+            false,
+            0.0,
+        )
+    }
+
+    /// 支持角度回滚的检测图片
+    /// 在 do_angle 为 true 时生效，如果图片经过了角度纠正，但识别效果过差，则取消角度纠正
+    ///
+    /// # Arguments
+    ///
+    /// - `&self` (`undefined`) - Describe this parameter.
+    /// - `img_src` (`&image`) - 图片
+    /// - `padding` (`u32`) - 变换图片时添加的边框的宽度（提高检测效果）
+    /// - `max_side_len` (`u32`) - 变换图片后图片宽和高保留的最大边长（超出该尺寸的图片将缩小）
+    /// - `box_score_thresh` (`f32`) - 检测存在文本的区域的分值阈值
+    /// - `do_angle` (`bool`) - 是否进行角度检测
+    /// - `angle_rollback_threshold` (`f32`) - 角度回滚的阈值，如果识别到的文字得分低于该值（或等于 NaN），则取消角度回滚
+    /// ```
+    pub fn detect_angle_rollback(
+        &self,
+        img_src: &image::RgbImage,
+        padding: u32,
+        max_side_len: u32,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+        do_angle: bool,
+        most_angle: bool,
+        angle_rollback_threshold: f32,
+    ) -> Result<OcrResult, OcrError> {
+        self.detect_base(
+            img_src,
+            padding,
+            max_side_len,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+            do_angle,
+            most_angle,
+            true,
+            angle_rollback_threshold,
         )
     }
 
@@ -124,6 +209,8 @@ impl OcrLite {
         un_clip_ratio: f32,
         do_angle: bool,
         most_angle: bool,
+        angle_rollback: bool,
+        angle_rollback_threshold: f32,
     ) -> Result<OcrResult, OcrError> {
         let text_boxes = self.db_net.get_text_boxes(
             img_src,
@@ -141,14 +228,29 @@ impl OcrLite {
 
         let mut rotated_images: Vec<image::RgbImage> = Vec::with_capacity(part_images.len());
 
-        for (angle, mut part_image) in angles.iter().zip(part_images.into_iter()) {
+        // 角度纠正回滚
+        let mut angle_rollback_records =
+            HashMap::<usize, ImageBuffer<image::Rgb<u8>, Vec<u8>>>::new();
+
+        for (index, (angle, mut part_image)) in
+            angles.iter().zip(part_images.into_iter()).enumerate()
+        {
             if angle.index == 1 {
+                if angle_rollback {
+                    // 保留原始副本
+                    angle_rollback_records.insert(index, part_image.clone());
+                }
+
                 OcrUtils::mat_rotate_clock_wise_180(&mut part_image);
             }
             rotated_images.push(part_image);
         }
 
-        let text_lines = self.crnn_net.get_text_lines(&rotated_images)?;
+        let text_lines = self.crnn_net.get_text_lines(
+            &rotated_images,
+            &angle_rollback_records,
+            angle_rollback_threshold,
+        )?;
 
         let mut text_blocks = Vec::with_capacity(text_lines.len());
         for i in 0..text_lines.len() {
