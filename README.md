@@ -42,6 +42,30 @@ fn run_test() -> Result<(), OcrError> {
 
     Ok(())
 }
+
+// 某些情况下角度纠正会得出错误结果，支持角度纠正回退，当角度纠正后的文本识别得分低于指定值（或为 NaN）时，将使用进行角度纠正前的图片进行识别
+fn run_test_angle_rollback() -> Result<(), OcrError> {
+    let mut ocr = OcrLite::new();
+    ocr.init_models(
+        "./models/ch_PP-OCRv4_det_infer.onnx",
+        "./models/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+        "./models/ch_PP-OCRv4_rec_infer.onnx",
+        "./models/ppocr_keys_v1.txt",
+        2,
+    )?;
+
+    println!("===test_angle_rollback===");
+    let test_img = image::open("./docs/test_images/test_4.png")
+        .unwrap()
+        .to_rgb8();
+    let res =
+        ocr.detect_angle_rollback(&test_img, 50, 1024, 0.5, 0.3, 1.6, true, false, 0.0)?;
+    res.text_blocks.iter().for_each(|item| {
+        println!("text: {} score: {}", item.text, item.text_score);
+    });
+
+    Ok(())
+}
 ```
 
 ### Reference Development Environment
