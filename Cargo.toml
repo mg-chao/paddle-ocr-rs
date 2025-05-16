@@ -1,6 +1,6 @@
 [package]
 name = "paddle-ocr-rs"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 readme = "README.md"
 keywords = ["paddle", "ocr", "onnx"]
