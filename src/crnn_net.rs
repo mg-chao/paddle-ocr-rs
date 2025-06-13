@@ -1,6 +1,5 @@
 use ort::inputs;
 use ort::session::Session;
-use ort::value::Value;
 use std::collections::HashMap;
 
 use crate::{base_net::BaseNet, ocr_error::OcrError, ocr_result::TextLine, ocr_utils::OcrUtils};
@@ -80,7 +79,7 @@ impl CrnnNet {
     }
 
     pub fn get_text_lines(
-        &mut self,
+        &self,
         part_imgs: &Vec<image::RgbImage>,
         angle_rollback_records: &HashMap<usize, image::RgbImage>,
         angle_rollback_threshold: f32,
@@ -102,7 +101,11 @@ impl CrnnNet {
         Ok(text_lines)
     }
 
-    fn get_text_line(&mut self, img_src: &image::RgbImage) -> Result<TextLine, OcrError> {
+    fn get_text_line(&self, img_src: &image::RgbImage) -> Result<TextLine, OcrError> {
+        let Some(session) = &self.session else {
+            return Err(OcrError::SessionNotInitialized);
+        };
+
         let scale = CRNN_DST_HEIGHT as f32 / img_src.height() as f32;
         let dst_width = (img_src.width() as f32 * scale) as u32;
 
@@ -116,24 +119,18 @@ impl CrnnNet {
         let input_tensors =
             OcrUtils::substract_mean_normalize(&src_resize, &MEAN_VALUES, &NORM_VALUES);
 
-        // 提取数据以避免借用冲突
-        let (src_data, height, width) = {
-            let Some(session) = self.session.as_mut() else {
-                return Err(OcrError::SessionNotInitialized);
-            };
-            let outputs = session.run(inputs![self.input_names[0].clone() => Value::from_array(input_tensors)?])?;
+        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
 
-            let (_, red_data) = outputs.iter().next().unwrap();
-            let tensor_data = red_data.try_extract_tensor::<f32>()?;
-            let dimensions = tensor_data.0;
-            let height = dimensions[1];
-            let width = dimensions[2];
-            let src_data: Vec<f32> = tensor_data.1.iter().copied().collect();
-            
-            (src_data, height, width)
-        };
+        let (_, red_data) = outputs.iter().next().unwrap();
 
-        self.score_to_text_line(&src_data, height as usize, width as usize)
+        let src_data = red_data.try_extract_tensor::<f32>()?;
+
+        let dimensions = src_data.shape();
+        let height = dimensions[1];
+        let width = dimensions[2];
+        let src_data: Vec<f32> = src_data.iter().map(|&x| x).collect();
+
+        self.score_to_text_line(&src_data, height, width)
     }
 
     fn score_to_text_line(
