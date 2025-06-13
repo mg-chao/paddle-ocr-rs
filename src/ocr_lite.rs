@@ -34,12 +34,11 @@ impl OcrLite {
         det_path: &str,
         cls_path: &str,
         rec_path: &str,
-        keys_path: &str,
         num_thread: usize,
     ) -> Result<(), OcrError> {
         self.db_net.init_model(det_path, num_thread)?;
         self.angle_net.init_model(cls_path, num_thread)?;
-        self.crnn_net.init_model(rec_path, keys_path, num_thread)?;
+        self.crnn_net.init_model(rec_path, num_thread)?;
         Ok(())
     }
 
@@ -48,19 +47,18 @@ impl OcrLite {
         det_bytes: &[u8],
         cls_bytes: &[u8],
         rec_bytes: &[u8],
-        keys_bytes: &[u8],
         num_thread: usize,
     ) -> Result<(), OcrError> {
         self.db_net.init_model_from_memory(det_bytes, num_thread)?;
         self.angle_net
             .init_model_from_memory(cls_bytes, num_thread)?;
         self.crnn_net
-            .init_model_from_memory(rec_bytes, keys_bytes, num_thread)?;
+            .init_model_from_memory(rec_bytes, num_thread)?;
         Ok(())
     }
 
     fn detect_base(
-        &self,
+        &mut self,
         img_src: &image::RgbImage,
         padding: u32,
         max_side_len: u32,
@@ -111,7 +109,7 @@ impl OcrLite {
     /// - `do_angle` (`bool`) - 是否进行角度检测
     /// ```
     pub fn detect(
-        &self,
+        &mut self,
         img_src: &image::RgbImage,
         padding: u32,
         max_side_len: u32,
@@ -149,7 +147,7 @@ impl OcrLite {
     /// - `angle_rollback_threshold` (`f32`) - 角度回滚的阈值，如果识别到的文字得分低于该值（或等于 NaN），则取消角度回滚
     /// ```
     pub fn detect_angle_rollback(
-        &self,
+        &mut self,
         img_src: &image::RgbImage,
         padding: u32,
         max_side_len: u32,
@@ -175,7 +173,7 @@ impl OcrLite {
     }
 
     pub fn detect_from_path(
-        &self,
+        &mut self,
         img_path: &str,
         padding: u32,
         max_side_len: u32,
@@ -200,7 +198,7 @@ impl OcrLite {
     }
 
     fn detect_once(
-        &self,
+        &mut self,
         img_src: &image::RgbImage,
         scale: &ScaleParam,
         padding: u32,

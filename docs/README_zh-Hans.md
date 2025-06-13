@@ -4,40 +4,92 @@
 
 ### 示例
 
+
 ```rust
 use crate::{ocr_error::OcrError, ocr_lite::OcrLite};
 
 fn run_test() -> Result<(), OcrError> {
     let mut ocr = OcrLite::new();
     ocr.init_models(
-        "./models/ch_PP-OCRv4_det_infer.onnx",
+        "./models/ch_PP-OCRv5_mobile_det.onnx",
         "./models/ch_ppocr_mobile_v2.0_cls_infer.onnx",
-        "./models/ch_PP-OCRv4_rec_infer.onnx",
-        "./models/ppocr_keys_v1.txt",
+        "./models/ch_PP-OCRv5_rec_mobile_infer.onnx",
         2,
     )?;
 
     println!("===test_1===");
-    let res =
-        ocr.detect_from_path("./test/test_1.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+    let res = ocr.detect_from_path(
+        "./docs/test_images/test_1.png",
+        50,
+        1024,
+        0.5,
+        0.3,
+        1.6,
+        false,
+        false,
+    )?;
     res.text_blocks.iter().for_each(|item| {
         println!("text: {} score: {}", item.text, item.text_score);
     });
+
     println!("===test_2===");
-    let res =
-        ocr.detect_from_path("./test/test_2.png", 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+    let res = ocr.detect_from_path(
+        "./docs/test_images/test_2.png",
+        50,
+        1024,
+        0.5,
+        0.3,
+        1.6,
+        false,
+        false,
+    )?;
     res.text_blocks.iter().for_each(|item| {
         println!("text: {} score: {}", item.text, item.text_score);
     });
 
     // 通过 image 读取图片
     println!("===test_3===");
-    let test_three_img = image::open("./docs/test_images/test_3.png").unwrap().to_rgb8();
+    let test_three_img = image::open("./docs/test_images/test_3.png")
+        .unwrap()
+        .to_rgb8();
     let res = ocr.detect(&test_three_img, 50, 1024, 0.5, 0.3, 1.6, true, false)?;
     res.text_blocks.iter().for_each(|item| {
         println!("text: {} score: {}", item.text, item.text_score);
     });
 
+    Ok(())
+}
+
+// 某些情况下角度纠正会得出错误结果，支持角度纠正回退，当角度纠正后的文本识别得分低于指定值（或为 NaN）时，将使用进行角度纠正前的图片进行识别
+fn run_test_angle_rollback() -> Result<(), OcrError> {
+    let mut ocr = OcrLite::new();
+    ocr.init_models(
+        "./models/ch_PP-OCRv4_det_infer.onnx",
+        "./models/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+        "./models/ch_PP-OCRv4_rec_infer.onnx",
+        2,
+    )?;
+
+
+    println!("===test_angle_ori===");
+    let test_img = image::open("./docs/test_images/test_4.png")
+        .unwrap()
+        .to_rgb8();
+    let res = ocr.detect(&test_img, 50, 1024, 0.5, 0.3, 1.6, true, false)?;
+    res.text_blocks.iter().for_each(|item| {
+        println!("text: {} score: {}", item.text, item.text_score);
+    });
+
+
+    println!("===test_angle_rollback===");
+    let test_img = image::open("./docs/test_images/test_4.png")
+        .unwrap()
+        .to_rgb8();
+    let res =
+        ocr.detect_angle_rollback(&test_img, 50, 1024, 0.5, 0.3, 1.6, true, false, 0.8)?;
+    res.text_blocks.iter().for_each(|item| {
+        println!("text: {} score: {}", item.text, item.text_score);
+    });
     Ok(())
 }
 ```
