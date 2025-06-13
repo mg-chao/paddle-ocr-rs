@@ -58,7 +58,7 @@ impl OcrLite {
     }
 
     fn detect_base(
-        &self,
+        &mut self,
         img_src: &image::RgbImage,
         padding: u32,
         max_side_len: u32,
@@ -109,7 +109,7 @@ impl OcrLite {
     /// - `do_angle` (`bool`) - 是否进行角度检测
     /// ```
     pub fn detect(
-        &self,
+        &mut self,
         img_src: &image::RgbImage,
         padding: u32,
         max_side_len: u32,
@@ -147,7 +147,7 @@ impl OcrLite {
     /// - `angle_rollback_threshold` (`f32`) - 角度回滚的阈值，如果识别到的文字得分低于该值（或等于 NaN），则取消角度回滚
     /// ```
     pub fn detect_angle_rollback(
-        &self,
+        &mut self,
         img_src: &image::RgbImage,
         padding: u32,
         max_side_len: u32,
@@ -173,7 +173,7 @@ impl OcrLite {
     }
 
     pub fn detect_from_path(
-        &self,
+        &mut self,
         img_path: &str,
         padding: u32,
         max_side_len: u32,
@@ -198,7 +198,7 @@ impl OcrLite {
     }
 
     fn detect_once(
-        &self,
+        &mut self,
         img_src: &image::RgbImage,
         scale: &ScaleParam,
         padding: u32,
