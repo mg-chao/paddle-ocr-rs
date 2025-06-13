@@ -37,15 +37,10 @@ impl BaseNet for CrnnNet {
 }
 
 impl CrnnNet {
-    pub fn init_model(
-        &mut self,
-        path: &str,
-        keys_path: &str,
-        num_thread: usize,
-    ) -> Result<(), OcrError> {
+    pub fn init_model(&mut self, path: &str, num_thread: usize) -> Result<(), OcrError> {
         BaseNet::init_model(self, path, num_thread)?;
 
-        self.keys = self.get_keys(keys_path)?;
+        self.keys = self.get_keys()?;
 
         Ok(())
     }
@@ -53,43 +48,33 @@ impl CrnnNet {
     pub fn init_model_from_memory(
         &mut self,
         model_bytes: &[u8],
-        keys_bytes: &[u8],
         num_thread: usize,
     ) -> Result<(), OcrError> {
         BaseNet::init_model_from_memory(self, model_bytes, num_thread)?;
 
-        self.keys = self.get_keys_from_memory(keys_bytes)?;
+        self.keys = self.get_keys()?;
 
         Ok(())
     }
 
-    fn get_keys<P: AsRef<Path>>(&mut self, path: P) -> Result<Vec<String>, OcrError> {
-        let mut keys = Vec::new();
+    fn get_keys(&mut self) -> Result<Vec<String>, OcrError> {
+        // 简单处理下报错，模型正确的话并无概率出错
+        let model_charater_list = self
+            .session
+            .as_ref()
+            .expect("crnn_net session not initialized")
+            .metadata()
+            .expect("crnn_net metadata not initialized")
+            .custom("character")
+            .expect("crnn_net character not initialized[0]")
+            .expect("crnn_net character not initialized[1]");
+
+        // 大概估一个数即可
+        let mut keys = Vec::with_capacity((model_charater_list.len() as f32 / 3.9) as usize);
 
         keys.push("#".to_string());
 
-        let file = File::open(path)?;
-        let reader = BufReader::new(file);
-
-        for line in reader.lines() {
-            keys.push(line?);
-        }
-
-        keys.push(" ".to_string());
-
-        Ok(keys)
-    }
-
-    fn get_keys_from_memory(&mut self, keys_bytes: &[u8]) -> Result<Vec<String>, OcrError> {
-        let mut keys = Vec::new();
-
-        keys.push("#".to_string());
-
-        let reader = BufReader::new(keys_bytes);
-
-        for line in reader.lines() {
-            keys.push(line?);
-        }
+        keys.extend(model_charater_list.split('\n').map(|s| s.to_string()));
 
         keys.push(" ".to_string());
 

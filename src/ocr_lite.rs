@@ -34,12 +34,11 @@ impl OcrLite {
         det_path: &str,
         cls_path: &str,
         rec_path: &str,
-        keys_path: &str,
         num_thread: usize,
     ) -> Result<(), OcrError> {
         self.db_net.init_model(det_path, num_thread)?;
         self.angle_net.init_model(cls_path, num_thread)?;
-        self.crnn_net.init_model(rec_path, keys_path, num_thread)?;
+        self.crnn_net.init_model(rec_path, num_thread)?;
         Ok(())
     }
 
@@ -48,14 +47,13 @@ impl OcrLite {
         det_bytes: &[u8],
         cls_bytes: &[u8],
         rec_bytes: &[u8],
-        keys_bytes: &[u8],
         num_thread: usize,
     ) -> Result<(), OcrError> {
         self.db_net.init_model_from_memory(det_bytes, num_thread)?;
         self.angle_net
             .init_model_from_memory(cls_bytes, num_thread)?;
         self.crnn_net
-            .init_model_from_memory(rec_bytes, keys_bytes, num_thread)?;
+            .init_model_from_memory(rec_bytes, num_thread)?;
         Ok(())
     }
 
