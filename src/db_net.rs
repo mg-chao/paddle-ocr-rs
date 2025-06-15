@@ -62,7 +62,7 @@ impl DbNet {
             img_src,
             scale.dst_width as u32,
             scale.dst_height as u32,
-            image::imageops::FilterType::CatmullRom,
+            image::imageops::FilterType::Triangle,
         );
 
         let input_tensors =
