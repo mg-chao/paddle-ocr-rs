@@ -11,11 +11,11 @@ pub trait BaseNet {
     fn get_session_builder(
         &self,
         num_thread: usize,
-        builder_fn: Option<fn(SessionBuilder) -> SessionBuilder>,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
     ) -> Result<SessionBuilder, OcrError> {
         let builder = Session::builder()?;
         let builder = match builder_fn {
-            Some(custom) => custom(builder),
+            Some(custom) => custom(builder)?,
             None => builder
                 .with_optimization_level(GraphOptimizationLevel::Level2)?
                 .with_intra_threads(num_thread)?
@@ -43,7 +43,7 @@ pub trait BaseNet {
         &mut self,
         path: &str,
         num_thread: usize,
-        builder_fn: Option<fn(SessionBuilder) -> SessionBuilder>,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
     ) -> Result<(), OcrError> {
         let session = self
             .get_session_builder(num_thread, builder_fn)?
@@ -57,7 +57,7 @@ pub trait BaseNet {
         &mut self,
         model_bytes: &[u8],
         num_thread: usize,
-        builder_fn: Option<fn(SessionBuilder) -> SessionBuilder>,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
     ) -> Result<(), OcrError> {
         let session = self
             .get_session_builder(num_thread, builder_fn)?

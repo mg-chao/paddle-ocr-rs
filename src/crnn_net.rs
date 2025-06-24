@@ -39,7 +39,7 @@ impl CrnnNet {
         &mut self,
         path: &str,
         num_thread: usize,
-        builder_fn: Option<fn(SessionBuilder) -> SessionBuilder>,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
     ) -> Result<(), OcrError> {
         BaseNet::init_model(self, path, num_thread, builder_fn)?;
 
@@ -52,7 +52,7 @@ impl CrnnNet {
         &mut self,
         model_bytes: &[u8],
         num_thread: usize,
-        builder_fn: Option<fn(SessionBuilder) -> SessionBuilder>,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
     ) -> Result<(), OcrError> {
         BaseNet::init_model_from_memory(self, model_bytes, num_thread, builder_fn)?;
 

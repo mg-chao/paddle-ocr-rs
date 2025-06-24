@@ -48,7 +48,7 @@ impl OcrLite {
         det_path: &str,
         cls_path: &str,
         rec_path: &str,
-        builder_fn: fn(SessionBuilder) -> SessionBuilder,
+        builder_fn: fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>,
     ) -> Result<(), OcrError> {
         self.db_net.init_model(det_path, 0, Some(builder_fn))?;
         self.angle_net.init_model(cls_path, 0, Some(builder_fn))?;
@@ -77,7 +77,7 @@ impl OcrLite {
         det_bytes: &[u8],
         cls_bytes: &[u8],
         rec_bytes: &[u8],
-        builder_fn: fn(SessionBuilder) -> SessionBuilder,
+        builder_fn: fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>,
     ) -> Result<(), OcrError> {
         self.db_net
             .init_model_from_memory(det_bytes, 0, Some(builder_fn))?;
