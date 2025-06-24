@@ -1,4 +1,5 @@
 use ort::session::Session;
+use ort::value::Tensor;
 use ort::{inputs, session::builder::SessionBuilder};
 use std::collections::HashMap;
 
@@ -85,7 +86,7 @@ impl CrnnNet {
     }
 
     pub fn get_text_lines(
-        &self,
+        &mut self,
         part_imgs: &Vec<image::RgbImage>,
         angle_rollback_records: &HashMap<usize, image::RgbImage>,
         angle_rollback_threshold: f32,
@@ -107,8 +108,8 @@ impl CrnnNet {
         Ok(text_lines)
     }
 
-    fn get_text_line(&self, img_src: &image::RgbImage) -> Result<TextLine, OcrError> {
-        let Some(session) = &self.session else {
+    fn get_text_line(&mut self, img_src: &image::RgbImage) -> Result<TextLine, OcrError> {
+        let Some(session) = &mut self.session else {
             return Err(OcrError::SessionNotInitialized);
         };
 
@@ -125,25 +126,26 @@ impl CrnnNet {
         let input_tensors =
             OcrUtils::substract_mean_normalize(&src_resize, &MEAN_VALUES, &NORM_VALUES);
 
-        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
+        let input_tensors = Tensor::from_array(input_tensors)?;
+
+        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors])?;
 
         let (_, red_data) = outputs.iter().next().unwrap();
 
-        let src_data = red_data.try_extract_tensor::<f32>()?;
-
-        let dimensions = src_data.shape();
-        let height = dimensions[1];
-        let width = dimensions[2];
+        let (shape, src_data) = red_data.try_extract_tensor::<f32>()?;
+        let dimensions = shape;
+        let height = dimensions[1] as usize;
+        let width = dimensions[2] as usize;
         let src_data: Vec<f32> = src_data.iter().map(|&x| x).collect();
 
-        self.score_to_text_line(&src_data, height, width)
+        Self::score_to_text_line(&src_data, height, width, &self.keys)
     }
 
     fn score_to_text_line(
-        &self,
         output_data: &Vec<f32>,
         height: usize,
         width: usize,
+        keys: &Vec<String>,
     ) -> Result<TextLine, OcrError> {
         let mut text_line = TextLine::default();
         let mut last_index = 0;
@@ -167,8 +169,8 @@ impl CrnnNet {
                         }
                     });
 
-            if max_index > 0 && max_index < self.keys.len() && !(i > 0 && max_index == last_index) {
-                text_line.text.push_str(&self.keys[max_index]);
+            if max_index > 0 && max_index < keys.len() && !(i > 0 && max_index == last_index) {
+                text_line.text.push_str(&keys[max_index]);
                 text_score_sum += max_value;
                 text_socre_count += 1;
             }
