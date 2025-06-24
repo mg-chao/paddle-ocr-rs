@@ -1,5 +1,5 @@
-use ort::inputs;
 use ort::session::Session;
+use ort::{inputs, session::builder::SessionBuilder};
 use std::collections::HashMap;
 
 use crate::{base_net::BaseNet, ocr_error::OcrError, ocr_result::TextLine, ocr_utils::OcrUtils};
@@ -34,8 +34,13 @@ impl BaseNet for CrnnNet {
 }
 
 impl CrnnNet {
-    pub fn init_model(&mut self, path: &str, num_thread: usize) -> Result<(), OcrError> {
-        BaseNet::init_model(self, path, num_thread)?;
+    pub fn init_model(
+        &mut self,
+        path: &str,
+        num_thread: usize,
+        builder_fn: Option<fn(SessionBuilder) -> SessionBuilder>,
+    ) -> Result<(), OcrError> {
+        BaseNet::init_model(self, path, num_thread, builder_fn)?;
 
         self.keys = self.get_keys()?;
 
@@ -46,8 +51,9 @@ impl CrnnNet {
         &mut self,
         model_bytes: &[u8],
         num_thread: usize,
+        builder_fn: Option<fn(SessionBuilder) -> SessionBuilder>,
     ) -> Result<(), OcrError> {
-        BaseNet::init_model_from_memory(self, model_bytes, num_thread)?;
+        BaseNet::init_model_from_memory(self, model_bytes, num_thread, builder_fn)?;
 
         self.keys = self.get_keys()?;
 

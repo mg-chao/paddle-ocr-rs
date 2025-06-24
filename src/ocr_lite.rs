@@ -1,6 +1,7 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 
 use image::ImageBuffer;
+use ort::session::builder::SessionBuilder;
 
 use crate::{
     angle_net::AngleNet,
@@ -36,9 +37,22 @@ impl OcrLite {
         rec_path: &str,
         num_thread: usize,
     ) -> Result<(), OcrError> {
-        self.db_net.init_model(det_path, num_thread)?;
-        self.angle_net.init_model(cls_path, num_thread)?;
-        self.crnn_net.init_model(rec_path, num_thread)?;
+        self.db_net.init_model(det_path, num_thread, None)?;
+        self.angle_net.init_model(cls_path, num_thread, None)?;
+        self.crnn_net.init_model(rec_path, num_thread, None)?;
+        Ok(())
+    }
+
+    pub fn init_models_custom(
+        &mut self,
+        det_path: &str,
+        cls_path: &str,
+        rec_path: &str,
+        builder_fn: fn(SessionBuilder) -> SessionBuilder,
+    ) -> Result<(), OcrError> {
+        self.db_net.init_model(det_path, 0, Some(builder_fn))?;
+        self.angle_net.init_model(cls_path, 0, Some(builder_fn))?;
+        self.crnn_net.init_model(rec_path, 0, Some(builder_fn))?;
         Ok(())
     }
 
@@ -49,11 +63,28 @@ impl OcrLite {
         rec_bytes: &[u8],
         num_thread: usize,
     ) -> Result<(), OcrError> {
-        self.db_net.init_model_from_memory(det_bytes, num_thread)?;
+        self.db_net
+            .init_model_from_memory(det_bytes, num_thread, None)?;
         self.angle_net
-            .init_model_from_memory(cls_bytes, num_thread)?;
+            .init_model_from_memory(cls_bytes, num_thread, None)?;
         self.crnn_net
-            .init_model_from_memory(rec_bytes, num_thread)?;
+            .init_model_from_memory(rec_bytes, num_thread, None)?;
+        Ok(())
+    }
+
+    pub fn init_models_from_memory_custom(
+        &mut self,
+        det_bytes: &[u8],
+        cls_bytes: &[u8],
+        rec_bytes: &[u8],
+        builder_fn: fn(SessionBuilder) -> SessionBuilder,
+    ) -> Result<(), OcrError> {
+        self.db_net
+            .init_model_from_memory(det_bytes, 0, Some(builder_fn))?;
+        self.angle_net
+            .init_model_from_memory(cls_bytes, 0, Some(builder_fn))?;
+        self.crnn_net
+            .init_model_from_memory(rec_bytes, 0, Some(builder_fn))?;
         Ok(())
     }
 
