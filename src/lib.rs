@@ -155,4 +155,32 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn run_test_from_custom() -> Result<(), OcrError> {
+        let mut ocr = OcrLite::new();
+        ocr.init_models_custom(
+            "./models/ch_PP-OCRv5_mobile_det.onnx",
+            "./models/ch_ppocr_mobile_v2.0_cls_infer.onnx",
+            "./models/ch_PP-OCRv5_rec_mobile_infer.onnx",
+            |builder| Ok(builder.with_inter_threads(2)?.with_intra_threads(2)?),
+        )?;
+
+        println!("===test_from_custom===");
+        let res = ocr.detect_from_path(
+            "./docs/test_images/test_4.png",
+            50,
+            1024,
+            0.5,
+            0.3,
+            1.6,
+            false,
+            false,
+        )?;
+        res.text_blocks.iter().for_each(|item| {
+            println!("text: {} score: {}", item.text, item.text_score);
+        });
+
+        Ok(())
+    }
 }
