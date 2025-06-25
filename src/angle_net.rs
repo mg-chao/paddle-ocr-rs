@@ -1,9 +1,10 @@
+use crate::{base_net::BaseNet, ocr_error::OcrError, ocr_result::Angle, ocr_utils::OcrUtils};
+
 use ort::{
     inputs,
     session::{Session, SessionOutputs},
+    value::Tensor,
 };
-
-use crate::{base_net::BaseNet, ocr_error::OcrError, ocr_result::Angle, ocr_utils::OcrUtils};
 
 const MEAN_VALUES: [f32; 3] = [127.5, 127.5, 127.5];
 const NORM_VALUES: [f32; 3] = [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5];
@@ -36,7 +37,7 @@ impl BaseNet for AngleNet {
 
 impl AngleNet {
     pub fn get_angles(
-        &self,
+        &mut self,
         part_imgs: &[image::RgbImage],
         do_angle: bool,
         most_angle: bool,
@@ -65,10 +66,10 @@ impl AngleNet {
         Ok(angles)
     }
 
-    fn get_angle(&self, img_src: &image::RgbImage) -> Result<Angle, OcrError> {
+    fn get_angle(&mut self, img_src: &image::RgbImage) -> Result<Angle, OcrError> {
         let angle;
 
-        let Some(session) = &self.session else {
+        let Some(session) = &mut self.session else {
             return Err(OcrError::SessionNotInitialized);
         };
 
@@ -82,15 +83,16 @@ impl AngleNet {
         let input_tensors =
             OcrUtils::substract_mean_normalize(&angle_img, &MEAN_VALUES, &NORM_VALUES);
 
-        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
+        let input_tensors = Tensor::from_array(input_tensors)?;
 
-        angle = self.score_to_angle(&outputs, ANGLE_COLS)?;
+        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors])?;
+
+        angle = Self::score_to_angle(&outputs, ANGLE_COLS)?;
 
         Ok(angle)
     }
 
     fn score_to_angle(
-        &self,
         output_tensor: &SessionOutputs,
         angle_cols: usize,
     ) -> Result<Angle, OcrError> {
@@ -98,6 +100,7 @@ impl AngleNet {
 
         let src_data: Vec<f32> = red_data
             .try_extract_tensor::<f32>()?
+            .1
             .iter()
             .map(|&x| x)
             .collect();

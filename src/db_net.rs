@@ -8,7 +8,7 @@ use crate::{
 use geo_clipper::{Clipper, EndType, JoinType};
 use geo_types::{Coord, LineString, Polygon};
 use ort::{inputs, session::SessionOutputs};
-use ort::{session::Session};
+use ort::{session::Session, value::Tensor};
 use std::cmp::Ordering;
 
 const MEAN_VALUES: [f32; 3] = [
@@ -47,14 +47,14 @@ impl BaseNet for DbNet {
 
 impl DbNet {
     pub fn get_text_boxes(
-        &self,
+        &mut self,
         img_src: &image::RgbImage,
         scale: &ScaleParam,
         box_score_thresh: f32,
         box_thresh: f32,
         un_clip_ratio: f32,
     ) -> Result<Vec<TextBox>, OcrError> {
-        let Some(session) = &self.session else {
+        let Some(session) = &mut self.session else {
             return Err(OcrError::SessionNotInitialized);
         };
 
@@ -68,7 +68,9 @@ impl DbNet {
         let input_tensors =
             OcrUtils::substract_mean_normalize(&src_resize, &MEAN_VALUES, &NORM_VALUES);
 
-        let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors]?)?;
+        let tensor = Tensor::from_array(input_tensors)?;
+
+        let outputs = session.run(inputs![self.input_names[0].clone() => tensor])?;
 
         let text_boxes = Self::get_text_boxes_core(
             &outputs,
@@ -106,6 +108,7 @@ impl DbNet {
 
         let pred_data: Vec<f32> = red_data
             .try_extract_tensor::<f32>()?
+            .1
             .iter()
             .map(|&x| x)
             .collect();
