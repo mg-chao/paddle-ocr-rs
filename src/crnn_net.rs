@@ -96,10 +96,10 @@ impl CrnnNet {
         for (index, img) in part_imgs.iter().enumerate() {
             let mut text_line = self.get_text_line(img)?;
 
-            if text_line.text_score.is_nan() || text_line.text_score < angle_rollback_threshold {
-                if let Some(angle_rollback_record) = angle_rollback_records.get(&index) {
-                    text_line = self.get_text_line(angle_rollback_record)?;
-                }
+            if (text_line.text_score.is_nan() || text_line.text_score < angle_rollback_threshold)
+                && let Some(angle_rollback_record) = angle_rollback_records.get(&index)
+            {
+                text_line = self.get_text_line(angle_rollback_record)?;
             }
 
             text_lines.push(text_line);
