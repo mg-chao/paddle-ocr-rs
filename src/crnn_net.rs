@@ -48,6 +48,20 @@ impl CrnnNet {
         Ok(())
     }
 
+    pub fn init_model_dict_file(
+        &mut self,
+        path: &str,
+        num_thread: usize,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
+        dict_file_path: &str,
+    ) -> Result<(), OcrError> {
+        BaseNet::init_model(self, path, num_thread, builder_fn)?;
+
+        self.read_keys_from_file(dict_file_path)?;
+
+        Ok(())
+    }
+
     pub fn init_model_from_memory(
         &mut self,
         model_bytes: &[u8],
@@ -83,6 +97,15 @@ impl CrnnNet {
         keys.push(" ".to_string());
 
         Ok(keys)
+    }
+
+    fn read_keys_from_file(&mut self, path: &str) -> Result<(), OcrError> {
+        let content = std::fs::read_to_string(path)?;
+        let mut keys = Vec::new();
+
+        keys.extend(content.split('\n').map(|s| s.to_string()));
+        self.keys = keys;
+        Ok(())
     }
 
     pub fn get_text_lines(

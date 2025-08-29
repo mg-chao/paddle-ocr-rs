@@ -49,6 +49,21 @@ impl OcrLite {
         Ok(())
     }
 
+    pub fn init_models_with_dict(
+        &mut self,
+        det_path: &str,
+        cls_path: &str,
+        rec_path: &str,
+        dict_path: &str,
+        num_thread: usize,
+    ) -> Result<(), OcrError> {
+        self.db_net.init_model(det_path, num_thread, None)?;
+        self.angle_net.init_model(cls_path, num_thread, None)?;
+        self.crnn_net
+            .init_model_dict_file(rec_path, num_thread, None, dict_path)?;
+        Ok(())
+    }
+
     pub fn init_models_custom(
         &mut self,
         det_path: &str,
