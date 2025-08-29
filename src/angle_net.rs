@@ -67,16 +67,14 @@ impl AngleNet {
     }
 
     fn get_angle(&mut self, img_src: &image::RgbImage) -> Result<Angle, OcrError> {
-        let angle;
-
         let Some(session) = &mut self.session else {
             return Err(OcrError::SessionNotInitialized);
         };
 
         let angle_img = image::imageops::resize(
             img_src,
-            ANGLE_DST_WIDTH as u32,
-            ANGLE_DST_HEIGHT as u32,
+            ANGLE_DST_WIDTH,
+            ANGLE_DST_HEIGHT,
             image::imageops::FilterType::Triangle,
         );
 
@@ -87,7 +85,7 @@ impl AngleNet {
 
         let outputs = session.run(inputs![self.input_names[0].clone() => input_tensors])?;
 
-        angle = Self::score_to_angle(&outputs, ANGLE_COLS)?;
+        let angle = Self::score_to_angle(&outputs, ANGLE_COLS)?;
 
         Ok(angle)
     }
@@ -98,12 +96,7 @@ impl AngleNet {
     ) -> Result<Angle, OcrError> {
         let (_, red_data) = output_tensor.iter().next().unwrap();
 
-        let src_data: Vec<f32> = red_data
-            .try_extract_tensor::<f32>()?
-            .1
-            .iter()
-            .map(|&x| x)
-            .collect();
+        let src_data: Vec<f32> = red_data.try_extract_tensor::<f32>()?.1.to_vec();
 
         let mut angle = Angle::default();
         let mut max_value = f32::MIN;

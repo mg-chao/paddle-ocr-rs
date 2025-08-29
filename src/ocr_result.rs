@@ -81,7 +81,7 @@ pub struct TextBlock {
     pub text_score: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct OcrResult {
     pub text_blocks: Vec<TextBlock>,
 }

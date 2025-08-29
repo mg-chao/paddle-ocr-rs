@@ -21,6 +21,12 @@ pub struct OcrLite {
     crnn_net: CrnnNet,
 }
 
+impl Default for OcrLite {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OcrLite {
     pub fn new() -> Self {
         Self {
@@ -103,7 +109,7 @@ impl OcrLite {
     ) -> Result<OcrResult, OcrError> {
         let origin_max_side = img_src.width().max(img_src.height());
         let mut resize;
-        if max_side_len <= 0 || max_side_len > origin_max_side {
+        if max_side_len == 0 || max_side_len > origin_max_side {
             resize = origin_max_side;
         } else {
             resize = max_side_len;
@@ -218,8 +224,8 @@ impl OcrLite {
 
         self.detect(
             &img_src,
-            padding as u32,
-            max_side_len as u32,
+            padding,
+            max_side_len,
             box_score_thresh,
             box_thresh,
             un_clip_ratio,

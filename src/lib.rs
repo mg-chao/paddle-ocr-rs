@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 pub mod angle_net;
 pub mod base_net;
 pub mod crnn_net;
@@ -163,7 +165,7 @@ mod tests {
             "./models/ch_PP-OCRv5_mobile_det.onnx",
             "./models/ch_ppocr_mobile_v2.0_cls_infer.onnx",
             "./models/ch_PP-OCRv5_rec_mobile_infer.onnx",
-            |builder| Ok(builder.with_inter_threads(2)?.with_intra_threads(2)?),
+            |builder| builder.with_inter_threads(2)?.with_intra_threads(2),
         )?;
 
         println!("===test_from_custom===");

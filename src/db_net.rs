@@ -60,8 +60,8 @@ impl DbNet {
 
         let src_resize = image::imageops::resize(
             img_src,
-            scale.dst_width as u32,
-            scale.dst_height as u32,
+            scale.dst_width,
+            scale.dst_height,
             image::imageops::FilterType::Triangle,
         );
 
@@ -106,12 +106,7 @@ impl DbNet {
 
         let (_, red_data) = output_tensor.iter().next().unwrap();
 
-        let pred_data: Vec<f32> = red_data
-            .try_extract_tensor::<f32>()?
-            .1
-            .iter()
-            .map(|&x| x)
-            .collect();
+        let pred_data: Vec<f32> = red_data.try_extract_tensor::<f32>()?.1.to_vec();
 
         let cbuf_data: Vec<u8> = pred_data
             .iter()
@@ -173,16 +168,16 @@ impl DbNet {
             let mut final_points = Vec::new();
             for item in clip_min_box {
                 let x = (item.x / s.scale_width) as u32;
-                let ptx = x.max(0).min(s.src_width);
+                let ptx = x.min(s.src_width);
 
                 let y = (item.y / s.scale_height) as u32;
-                let pty = y.max(0).min(s.src_height);
+                let pty = y.min(s.src_height);
 
                 final_points.push(ocr_result::Point { x: ptx, y: pty });
             }
 
             let text_box = TextBox {
-                score: score as f32,
+                score,
                 points: final_points,
             };
 
@@ -193,10 +188,10 @@ impl DbNet {
     }
 
     fn get_mini_box(
-        contour_points: &Vec<imageproc::point::Point<i32>>,
+        contour_points: &[imageproc::point::Point<i32>],
         min_edge_size: &mut f32,
     ) -> Result<Vec<imageproc::point::Point<f32>>, OcrError> {
-        let rect = imageproc::geometry::min_area_rect(&contour_points);
+        let rect = imageproc::geometry::min_area_rect(contour_points);
 
         let mut rect_points: Vec<imageproc::point::Point<f32>> = rect
             .iter()
@@ -299,10 +294,7 @@ impl DbNet {
 
         let mut pts = Vec::<imageproc::point::Point<i32>>::new();
         for point in contour.points.iter() {
-            pts.push(imageproc::point::Point::new(
-                (point.x - xmin) as i32,
-                (point.y - ymin) as i32,
-            ));
+            pts.push(imageproc::point::Point::new(point.x - xmin, point.y - ymin));
         }
 
         imageproc::drawing::draw_polygon_mut(&mut mask, pts.as_slice(), image::Luma([255]));
@@ -349,7 +341,7 @@ impl DbNet {
 
         let area = Self::signed_polygon_area(box_points).abs();
         let length = Self::length_of_points(box_points);
-        let distance = area * unclip_ratio as f32 / length as f32;
+        let distance = area * unclip_ratio / length as f32;
 
         let co = Polygon::new(LineString::new(the_cliper_pts), vec![]);
         let solution = co
@@ -361,7 +353,7 @@ impl DbNet {
             )
             .0;
 
-        if solution.len() == 0 {
+        if solution.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -400,7 +392,7 @@ impl DbNet {
         let mut box_with_first = Vec::from(box_points);
         box_with_first.push(pt);
 
-        for idx in 1..box_with_first.len() {
+        (1..box_with_first.len()).for_each(|idx| {
             let pts = box_with_first[idx];
             let x1 = pts.x as f64;
             let y1 = pts.y as f64;
@@ -411,7 +403,7 @@ impl DbNet {
 
             x0 = x1;
             y0 = y1;
-        }
+        });
 
         length
     }
