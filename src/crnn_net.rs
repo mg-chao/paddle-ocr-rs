@@ -48,6 +48,20 @@ impl CrnnNet {
         Ok(())
     }
 
+    pub fn init_model_dict_file(
+        &mut self,
+        path: &str,
+        num_thread: usize,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
+        dict_file_path: &str,
+    ) -> Result<(), OcrError> {
+        BaseNet::init_model(self, path, num_thread, builder_fn)?;
+
+        self.read_keys_from_file(dict_file_path)?;
+
+        Ok(())
+    }
+
     pub fn init_model_from_memory(
         &mut self,
         model_bytes: &[u8],
@@ -85,9 +99,18 @@ impl CrnnNet {
         Ok(keys)
     }
 
+    fn read_keys_from_file(&mut self, path: &str) -> Result<(), OcrError> {
+        let content = std::fs::read_to_string(path)?;
+        let mut keys = Vec::new();
+
+        keys.extend(content.split('\n').map(|s| s.to_string()));
+        self.keys = keys;
+        Ok(())
+    }
+
     pub fn get_text_lines(
         &mut self,
-        part_imgs: &Vec<image::RgbImage>,
+        part_imgs: &[image::RgbImage],
         angle_rollback_records: &HashMap<usize, image::RgbImage>,
         angle_rollback_threshold: f32,
     ) -> Result<Vec<TextLine>, OcrError> {
@@ -96,10 +119,10 @@ impl CrnnNet {
         for (index, img) in part_imgs.iter().enumerate() {
             let mut text_line = self.get_text_line(img)?;
 
-            if text_line.text_score.is_nan() || text_line.text_score < angle_rollback_threshold {
-                if let Some(angle_rollback_record) = angle_rollback_records.get(&index) {
-                    text_line = self.get_text_line(angle_rollback_record)?;
-                }
+            if (text_line.text_score.is_nan() || text_line.text_score < angle_rollback_threshold)
+                && let Some(angle_rollback_record) = angle_rollback_records.get(&index)
+            {
+                text_line = self.get_text_line(angle_rollback_record)?;
             }
 
             text_lines.push(text_line);
@@ -118,8 +141,8 @@ impl CrnnNet {
 
         let src_resize = image::imageops::resize(
             img_src,
-            dst_width as u32,
-            CRNN_DST_HEIGHT as u32,
+            dst_width,
+            CRNN_DST_HEIGHT,
             image::imageops::FilterType::Triangle,
         );
 
@@ -136,16 +159,16 @@ impl CrnnNet {
         let dimensions = shape;
         let height = dimensions[1] as usize;
         let width = dimensions[2] as usize;
-        let src_data: Vec<f32> = src_data.iter().map(|&x| x).collect();
+        let src_data: Vec<f32> = src_data.to_vec();
 
         Self::score_to_text_line(&src_data, height, width, &self.keys)
     }
 
     fn score_to_text_line(
-        output_data: &Vec<f32>,
+        output_data: &[f32],
         height: usize,
         width: usize,
-        keys: &Vec<String>,
+        keys: &[String],
     ) -> Result<TextLine, OcrError> {
         let mut text_line = TextLine::default();
         let mut last_index = 0;
