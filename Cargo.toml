@@ -1,0 +1,18 @@
+[package]
+name = "paddle-ocr-rs"
+version = "0.7.0"
+edition = "2024"
+readme = "README.md"
+keywords = ["paddle", "ocr", "onnx"]
+license = "Apache-2.0"
+description = "Use Rust to call Paddle OCR models via ONNX Runtime for image text recognition."
+repository = "https://github.com/mg-chao/paddle-ocr-rs"
+authors = ["mg-chao <chao@mgchao.top>"]
+
+[dependencies]
+
+
+[features]
+default = ["download-binaries", "copy-dylibs", "ort/default"]
+download-binaries = ["ort/download-binaries"]
+copy-dylibs = ["ort/copy-dylibs"]
