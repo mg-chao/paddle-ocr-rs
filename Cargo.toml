@@ -10,9 +10,33 @@ repository = "https://github.com/mg-chao/paddle-ocr-rs"
 authors = ["mg-chao <chao@mgchao.top>"]
 
 [dependencies]
+geo-clipper = "0.9.0"
+geo-types = "0.7"
+image = { version = "0.25", default-features = true, features = ["png", "jpeg"] }
+imageproc = "0.25"
+kamadak-exif = "0.6"
+nalgebra = "0.33"
+ndarray = "0.16"
+num_cpus = "1.16"
+opencv = { version = "0.94", optional = true, default-features = false, features = ["clang-runtime", "imgproc"] }
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["ndarray", "std"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+thiserror = "2"
+unicode-bidi = "0.3"
+turbojpeg = { version = "1.4.0", default-features = false, features = ["cmake"] }
+rayon = "1.10"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["ndarray", "std", "directml"] }
 
 [features]
 default = ["download-binaries", "copy-dylibs", "ort/default"]
 download-binaries = ["ort/download-binaries"]
 copy-dylibs = ["ort/copy-dylibs"]
+opencv-backend = ["dep:opencv"]
+cuda-provider = ["ort/cuda"]
+cann-provider = ["ort/cann"]
