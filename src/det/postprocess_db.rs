@@ -229,6 +229,15 @@ impl DbPostProcess {
             .contour_f
             .extend(contour.iter().map(|p| [p[0] as f32, p[1] as f32]));
         let (points, sside) = mini_box_from_points_pure(&scratch.contour_f)?;
+        #[cfg(feature = "opencv-backend")]
+        let (points, sside) =
+            if let Ok(Some((opencv_points, opencv_sside))) =
+                mini_box_from_points_opencv(&scratch.contour_f)
+            {
+                (opencv_points, opencv_sside)
+            } else {
+                (points, sside)
+            };
         if sside < self.min_size as f32 {
             return None;
         }
@@ -242,19 +251,24 @@ impl DbPostProcess {
             return None;
         }
 
-        // pyclipper truncates float coordinates to integers. Snap tiny float
-        // drift near integer boundaries to avoid 1px shifts (e.g. 169.99997 -> 169).
-        let points_for_unclip = snap_quad_near_integer(points, 1e-3);
-        unclip_polygon_pyclipper_into(&points_for_unclip, self.unclip_ratio, &mut scratch.expanded);
+        unclip_polygon_pyclipper_into(&points, self.unclip_ratio, &mut scratch.expanded);
         if scratch.expanded.len() < 3 {
             return None;
         }
 
-        let (mut box1, sside2) = mini_box_from_points_pure(&scratch.expanded)?;
+        let (box1, sside2) = mini_box_from_points_pure(&scratch.expanded)?;
+        #[cfg(feature = "opencv-backend")]
+        let (box1, sside2) = if let Ok(Some((opencv_box, opencv_sside2))) =
+            mini_box_from_points_opencv(&scratch.expanded)
+        {
+            (opencv_box, opencv_sside2)
+        } else {
+            (box1, sside2)
+        };
+        let mut box1 = box1;
         if sside2 < self.min_size as f32 + 2.0 {
             return None;
         }
-
         scale_box_to_dest(
             &mut box1,
             scale_target.bitmap_w,
@@ -374,6 +388,7 @@ struct CandidateScratch {
     contour_f: Vec<[f32; 2]>,
     shifted_poly: Vec<[f32; 2]>,
     mask: Vec<u8>,
+    mask_dilated: Vec<u8>,
     expanded: Vec<[f32; 2]>,
 }
 
@@ -567,7 +582,22 @@ fn find_contours_from_mask_pure(mask: Vec<u8>, width: usize, height: usize) -> V
         return Vec::new();
     }
 
-    let Some(gray) = GrayImage::from_raw(width as u32, height as u32, mask) else {
+    // OpenCV parity (contours_new.cpp):
+    // 1) copyMakeBorder(image, 1,1,1,1, BORDER_CONSTANT=0)
+    // 2) threshold(..., 0, 1, THRESH_BINARY) semantics
+    // 3) findContours(..., offset + Point(-1,-1))
+    let pad_w = width + 2;
+    let pad_h = height + 2;
+    let mut padded = vec![0_u8; pad_w * pad_h];
+    for y in 0..height {
+        let src_row = &mask[y * width..(y + 1) * width];
+        let dst_row = &mut padded[(y + 1) * pad_w + 1..(y + 1) * pad_w + 1 + width];
+        for (dst, src) in dst_row.iter_mut().zip(src_row.iter()) {
+            *dst = if *src > 0 { 1 } else { 0 };
+        }
+    }
+
+    let Some(gray) = GrayImage::from_raw(pad_w as u32, pad_h as u32, padded) else {
         return Vec::new();
     };
 
@@ -581,7 +611,12 @@ fn find_contours_from_mask_pure(mask: Vec<u8>, width: usize, height: usize) -> V
                 }
                 let mut pts = Vec::with_capacity(c.points.len());
                 for p in c.points {
-                    pts.push([p.x, p.y]);
+                    let x = p.x - 1;
+                    let y = p.y - 1;
+                    if x < 0 || x >= width as i32 || y < 0 || y >= height as i32 {
+                        continue;
+                    }
+                    pts.push([x, y]);
                 }
                 let pts = chain_approx_simple(&pts);
                 if pts.len() >= 3 { Some(pts) } else { None }
@@ -596,7 +631,12 @@ fn find_contours_from_mask_pure(mask: Vec<u8>, width: usize, height: usize) -> V
         }
         let mut pts = Vec::with_capacity(c.points.len());
         for p in c.points {
-            pts.push([p.x, p.y]);
+            let x = p.x - 1;
+            let y = p.y - 1;
+            if x < 0 || x >= width as i32 || y < 0 || y >= height as i32 {
+                continue;
+            }
+            pts.push([x, y]);
         }
         let pts = chain_approx_simple(&pts);
         if pts.len() >= 3 {
@@ -684,6 +724,38 @@ fn dilate_mask_2x2(mask: &[u8], width: usize, height: usize) -> Vec<u8> {
     });
 
     out
+}
+
+fn dilate_mask_2x2_local<'a>(
+    src: &[u8],
+    width: usize,
+    height: usize,
+    scratch: &'a mut Vec<u8>,
+) -> &'a [u8] {
+    if width == 0 || height == 0 {
+        scratch.clear();
+        return scratch.as_slice();
+    }
+
+    let len = width * height;
+    if scratch.len() < len {
+        scratch.resize(len, 0);
+    }
+    let dst = &mut scratch[..len];
+
+    for y in 0..height {
+        let row_start = y * width;
+        let cur = &src[row_start..row_start + width];
+        let prev = if y == 0 {
+            None
+        } else {
+            Some(&src[row_start - width..row_start])
+        };
+        let row = &mut dst[row_start..row_start + width];
+        dilate_row_2x2_scalar(cur, prev, row);
+    }
+
+    dst
 }
 
 #[inline]
@@ -812,59 +884,6 @@ fn order_min_box_points_like_python(points: Quad) -> Quad {
     ]
 }
 
-fn snap_near_integer(value: f32, eps: f32) -> f32 {
-    let rounded = value.round();
-    if (value - rounded).abs() <= eps {
-        rounded
-    } else {
-        value
-    }
-}
-
-fn snap_quad_near_integer(mut quad: Quad, eps: f32) -> Quad {
-    let exact_eps = 1e-6_f32;
-    let mut skip_y_snap = [false; 4];
-
-    for (a, b) in [(0_usize, 1_usize), (3_usize, 2_usize)] {
-        let y0 = quad[a][1];
-        let y1 = quad[b][1];
-        if (y0 - y1).abs() > eps {
-            continue;
-        }
-
-        let frac0 = y0.fract().abs();
-        let frac1 = y1.fract().abs();
-        let y0_exact = frac0 <= exact_eps;
-        let y1_exact = frac1 <= exact_eps;
-        let y0_next = frac0 > 0.0 && (1.0 - frac0) <= eps;
-        let y1_next = frac1 > 0.0 && (1.0 - frac1) <= eps;
-
-        let mixed_exact_next = (y0_exact && y1_next) || (y1_exact && y0_next);
-        if mixed_exact_next && y0.abs() <= 700.0 && y1.abs() <= 700.0 {
-            let y = y0.min(y1);
-            quad[a][1] = y;
-            quad[b][1] = y;
-            skip_y_snap[a] = true;
-            skip_y_snap[b] = true;
-        }
-    }
-
-    for p in &mut quad {
-        p[0] = snap_near_integer(p[0], eps);
-    }
-
-    for (i, p) in quad.iter_mut().enumerate() {
-        if skip_y_snap[i] {
-            continue;
-        }
-        if p[1].abs() <= 700.0 {
-            p[1] = snap_near_integer(p[1], eps);
-        }
-    }
-
-    quad
-}
-
 fn mini_box_from_points_pure(points: &[[f32; 2]]) -> Option<(Quad, f32)> {
     if points.len() < 3 {
         return None;
@@ -957,21 +976,13 @@ fn box_score_fast_pure_with_scratch(
     let local_w = (xmax - xmin + 1) as usize;
     let local_h = (ymax - ymin + 1) as usize;
 
-    if box_points.len() == 4 {
-        let mut quad = [[0_i32; 2]; 4];
-        for (i, p) in box_points.iter().enumerate() {
-            // Match cv2.fillPoly behavior: truncate float vertices toward zero.
-            quad[i] = [(p[0] - xmin as f32) as i32, (p[1] - ymin as f32) as i32];
-        }
-        return quad_mean_in_roi(bitmap, xmin as usize, ymin as usize, local_w, local_h, quad);
-    }
-
     scratch.shifted_poly.clear();
     scratch.shifted_poly.reserve(box_points.len());
     for p in box_points {
-        scratch
-            .shifted_poly
-            .push([p[0] - xmin as f32, p[1] - ymin as f32]);
+        // Match cv2.fillPoly behavior: truncate float vertices toward zero.
+        let x = (p[0] - xmin as f32) as i32;
+        let y = (p[1] - ymin as f32) as i32;
+        scratch.shifted_poly.push([x as f32, y as f32]);
     }
 
     let mask_len = local_w * local_h;
@@ -980,143 +991,15 @@ fn box_score_fast_pure_with_scratch(
     }
     let mask = &mut scratch.mask[..mask_len];
     fill_polygon_mask(mask, local_w, local_h, &scratch.shifted_poly);
-    masked_mean_in_roi(bitmap, xmin as usize, ymin as usize, local_w, local_h, mask)
-}
-
-fn quad_mean_in_roi(
-    bitmap: ArrayView2<'_, f32>,
-    xmin: usize,
-    ymin: usize,
-    local_w: usize,
-    local_h: usize,
-    quad: [[i32; 2]; 4],
-) -> f32 {
-    if local_w == 0 || local_h == 0 {
-        return 0.0;
-    }
-
-    if let Some(src) = bitmap.as_slice_memory_order() {
-        return quad_mean_in_roi_contiguous(
-            src,
-            bitmap.ncols(),
-            xmin,
-            ymin,
-            local_w,
-            local_h,
-            quad,
-        );
-    }
-
-    let mut sum = 0.0_f64;
-    let mut count = 0_usize;
-    let mut intersections = [0.0_f32; 4];
-    for y in 0..local_h {
-        let y_local = y as i32;
-        let mut n = 0_usize;
-        let mut prev = quad[3];
-        for &curr in &quad {
-            let (x0, y0) = (prev[0], prev[1]);
-            let (x1, y1) = (curr[0], curr[1]);
-            if (y0 <= y_local && y_local < y1) || (y1 <= y_local && y_local < y0) {
-                let dy = (y1 - y0) as f32;
-                if dy.abs() > f32::EPSILON {
-                    let t = (y_local - y0) as f32 / dy;
-                    intersections[n] = x0 as f32 + (x1 - x0) as f32 * t;
-                    n += 1;
-                }
-            }
-            prev = curr;
-        }
-
-        if n < 2 {
-            continue;
-        }
-        intersections[..n].sort_by(|a, b| a.total_cmp(b));
-        let mut i = 0_usize;
-        while i + 1 < n {
-            let xs = intersections[i].ceil() as i32;
-            let xe = intersections[i + 1].floor() as i32;
-            if xs <= xe {
-                let x0 = xs.max(0).min(local_w as i32 - 1) as usize;
-                let x1 = xe.max(0).min(local_w as i32 - 1) as usize;
-                for x in x0..=x1 {
-                    sum += f64::from(bitmap[[ymin + y, xmin + x]]);
-                    count += 1;
-                }
-            }
-            i += 2;
-        }
-    }
-
-    if count == 0 {
-        0.0
-    } else {
-        (sum / count as f64) as f32
-    }
-}
-
-fn quad_mean_in_roi_contiguous(
-    bitmap: &[f32],
-    bitmap_w: usize,
-    xmin: usize,
-    ymin: usize,
-    local_w: usize,
-    local_h: usize,
-    quad: [[i32; 2]; 4],
-) -> f32 {
-    let mut sum = 0.0_f64;
-    let mut count = 0_usize;
-    let mut intersections = [0.0_f32; 4];
-    for y in 0..local_h {
-        let y_local = y as i32;
-        let mut n = 0_usize;
-        let mut prev = quad[3];
-        for &curr in &quad {
-            let (x0, y0) = (prev[0], prev[1]);
-            let (x1, y1) = (curr[0], curr[1]);
-            if (y0 <= y_local && y_local < y1) || (y1 <= y_local && y_local < y0) {
-                let dy = (y1 - y0) as f32;
-                if dy.abs() > f32::EPSILON {
-                    let t = (y_local - y0) as f32 / dy;
-                    intersections[n] = x0 as f32 + (x1 - x0) as f32 * t;
-                    n += 1;
-                }
-            }
-            prev = curr;
-        }
-
-        if n < 2 {
-            continue;
-        }
-        intersections[..n].sort_by(|a, b| a.total_cmp(b));
-
-        let src_row_off = (ymin + y) * bitmap_w + xmin;
-        // Safety:
-        // - `src_row_off + local_w <= bitmap.len()` because ROI bounds are clamped.
-        // - all `x` indices are clamped to `[0, local_w - 1]`.
-        unsafe {
-            let src_ptr = bitmap.as_ptr().add(src_row_off);
-            let mut i = 0_usize;
-            while i + 1 < n {
-                let xs = intersections[i].ceil() as i32;
-                let xe = intersections[i + 1].floor() as i32;
-                if xs <= xe {
-                    let x0 = xs.max(0).min(local_w as i32 - 1) as usize;
-                    let x1 = xe.max(0).min(local_w as i32 - 1) as usize;
-                    let len = x1 - x0 + 1;
-                    sum += sum_f32_slice(src_ptr.add(x0), len);
-                    count += len;
-                }
-                i += 2;
-            }
-        }
-    }
-
-    if count == 0 {
-        0.0
-    } else {
-        (sum / count as f64) as f32
-    }
+    let dilated_mask = dilate_mask_2x2_local(mask, local_w, local_h, &mut scratch.mask_dilated);
+    masked_mean_in_roi(
+        bitmap,
+        xmin as usize,
+        ymin as usize,
+        local_w,
+        local_h,
+        dilated_mask,
+    )
 }
 
 #[cfg(feature = "opencv-backend")]
@@ -1555,7 +1438,7 @@ fn min_area_rect_from_points_pure(points: &[[f32; 2]]) -> Option<PureRotatedRect
         return None;
     }
 
-    let mut angle = -std::f32::consts::FRAC_PI_2;
+    let mut angle = -std::f64::consts::FRAC_PI_2;
 
     if hull.len() > 2 {
         let (corner, vec1, vec2) = rotating_calipers_min_area_rect(&hull)?;
@@ -1564,19 +1447,24 @@ fn min_area_rect_from_points_pure(points: &[[f32; 2]]) -> Option<PureRotatedRect
             corner[1] + (vec1[1] + vec2[1]) * 0.5,
         ];
 
-        let mut width = (vec2[0] * vec2[0] + vec2[1] * vec2[1]).sqrt();
-        let mut height = (vec1[0] * vec1[0] + vec1[1] * vec1[1]).sqrt();
+        // OpenCV parity: compute lengths/angle in double precision and cast to float.
+        let mut width =
+            (((vec2[0] as f64 * vec2[0] as f64) + (vec2[1] as f64 * vec2[1] as f64)).sqrt())
+                as f32;
+        let mut height =
+            (((vec1[0] as f64 * vec1[0] as f64) + (vec1[1] as f64 * vec1[1] as f64)).sqrt())
+                as f32;
         let special_case_vertical = vec1[0] == 0.0 && vec1[1] > 0.0;
         if special_case_vertical {
             std::mem::swap(&mut width, &mut height);
         } else {
-            angle = -vec1[0].atan2(vec1[1]);
+            angle = -f64::atan2(vec1[0] as f64, vec1[1] as f64);
         }
 
         let rect = PureRotatedRect {
             center,
             size: [width, height],
-            angle: angle * 180.0 / std::f32::consts::PI,
+            angle: (angle * 180.0 / std::f64::consts::PI) as f32,
         };
         return Some(rect);
     }
@@ -1586,31 +1474,31 @@ fn min_area_rect_from_points_pure(points: &[[f32; 2]]) -> Option<PureRotatedRect
         let p1 = hull[1];
 
         let center = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
-        let dx = p0[0] - p1[0];
-        let dy = p0[1] - p1[1];
+        let dx = p0[0] as f64 - p1[0] as f64;
+        let dy = p0[1] as f64 - p1[1] as f64;
 
         let mut width = 0.0_f32;
-        let mut height = (dx * dx + dy * dy).sqrt();
+        let mut height = (dx * dx + dy * dy).sqrt() as f32;
         if dx == 0.0 {
             std::mem::swap(&mut width, &mut height);
         } else if dy < 0.0 {
-            angle = dy.atan2(dx);
+            angle = f64::atan2(dy, dx);
             std::mem::swap(&mut width, &mut height);
         } else if dy > 0.0 {
-            angle = -dx.atan2(dy);
+            angle = -f64::atan2(dx, dy);
         }
 
         return Some(PureRotatedRect {
             center,
             size: [width, height],
-            angle: angle * 180.0 / std::f32::consts::PI,
+            angle: (angle * 180.0 / std::f64::consts::PI) as f32,
         });
     }
 
     Some(PureRotatedRect {
         center: hull[0],
         size: [0.0, 0.0],
-        angle: angle * 180.0 / std::f32::consts::PI,
+        angle: (angle * 180.0 / std::f64::consts::PI) as f32,
     })
 }
 
@@ -1768,9 +1656,10 @@ fn first_vec_is_right(vec1: [f32; 2], vec2: [f32; 2]) -> bool {
 }
 
 fn rotated_rect_to_points_pure(rect: PureRotatedRect) -> Quad {
-    let angle = rect.angle * std::f32::consts::PI / 180.0;
-    let b = angle.cos() * 0.5;
-    let a = angle.sin() * 0.5;
+    // OpenCV RotatedRect::points uses double trigonometry then casts to float.
+    let angle = f64::from(rect.angle) * std::f64::consts::PI / 180.0;
+    let b = (angle.cos() as f32) * 0.5;
+    let a = (angle.sin() as f32) * 0.5;
 
     let ah = a * rect.size[1];
     let aw = a * rect.size[0];
@@ -2128,17 +2017,7 @@ fn sort_boxes_like_python(boxes: &mut Vec<Quad>, scores: &mut Vec<f32>, y_thresh
     final_order_in_y_sorted.sort_by(|&a, &b| {
         line_ids[a]
             .cmp(&line_ids[b])
-            .then_with(|| {
-                let xa = boxes[y_order[a]][0][0];
-                let xb = boxes[y_order[b]][0][0];
-                let ya = boxes[y_order[a]][0][1];
-                let yb = boxes[y_order[b]][0][1];
-                if (xa - xb).abs() <= 1.0 && (ya - yb).abs() <= 7.0 {
-                    std::cmp::Ordering::Equal
-                } else {
-                    xa.total_cmp(&xb)
-                }
-            })
+            .then_with(|| boxes[y_order[a]][0][0].total_cmp(&boxes[y_order[b]][0][0]))
             .then_with(|| a.cmp(&b))
     });
 
@@ -2185,7 +2064,7 @@ mod tests {
     use super::{
         DbPostProcess, box_score_fast_pure, build_threshold_bitmap, contour_score_pure,
         dilate_mask_2x2, fill_polygon_mask, masked_mean_in_roi, min_area_rect_from_points_pure,
-        unclip_polygon_like_opencv_db,
+        sort_boxes_like_python, unclip_polygon_like_opencv_db,
     };
     use crate::config::VisionBackend;
     use ndarray::Array2;
@@ -2271,7 +2150,7 @@ mod tests {
     }
 
     #[test]
-    fn box_score_fast_quad_matches_mask_reference() {
+    fn box_score_fast_quad_matches_dilated_mask_reference() {
         let mut pred = Array2::<f32>::zeros((27, 39));
         for y in 0..pred.nrows() {
             for x in 0..pred.ncols() {
@@ -2314,17 +2193,18 @@ mod tests {
             }
             let mut mask = vec![0_u8; local_w * local_h];
             fill_polygon_mask(&mut mask, local_w, local_h, &shifted);
+            let dilated = dilate_mask_2x2(&mask, local_w, local_h);
             let reference = masked_mean_in_roi(
                 pred.view(),
                 xmin as usize,
                 ymin as usize,
                 local_w,
                 local_h,
-                &mask,
+                &dilated,
             );
             assert!(
                 (fast - reference).abs() <= 1e-6,
-                "quad score mismatch: fast={fast} ref={reference} quad={quad:?}"
+                "quad score mismatch (dilated mask): fast={fast} ref={reference} quad={quad:?}"
             );
         }
     }
@@ -2370,5 +2250,22 @@ mod tests {
         let expected = reference(&mask, width, height);
         let out = dilate_mask_2x2(&mask, width, height);
         assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn sort_boxes_like_python_orders_by_x_within_same_line() {
+        let mut boxes = vec![
+            [[10.0, 10.0], [20.0, 10.0], [20.0, 20.0], [10.0, 20.0]],
+            [[9.5, 11.0], [19.5, 11.0], [19.5, 21.0], [9.5, 21.0]],
+            [[100.0, 40.0], [120.0, 40.0], [120.0, 50.0], [100.0, 50.0]],
+        ];
+        let mut scores = vec![0.9, 0.8, 0.7];
+
+        sort_boxes_like_python(&mut boxes, &mut scores, 10.0);
+
+        // First two boxes are in the same line bucket; Python sorts by x only.
+        assert!(boxes[0][0][0] <= boxes[1][0][0]);
+        assert_eq!(boxes[2][0][0], 100.0);
+        assert_eq!(scores.len(), boxes.len());
     }
 }

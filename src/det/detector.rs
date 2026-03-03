@@ -113,12 +113,24 @@ impl Detector {
             ));
         };
 
+        let det_vision_backend = resolve_backend_strict(config.runtime.vision_backend)?;
+        #[cfg(feature = "opencv-backend")]
+        let det_vision_backend = {
+            let mut backend = det_vision_backend;
+            if matches!(backend, crate::config::VisionBackend::PureRust) {
+                // Keep detector parity with RapidOCR Python when OpenCV is linked.
+                // Pure-Rust remains the fallback path for builds without OpenCV.
+                backend = crate::config::VisionBackend::OpenCv;
+            }
+            backend
+        };
+
         let pre = DetPreProcess {
             limit_side_len: config.limit_side_len,
             limit_type: config.limit_type,
             mean: config.mean,
             std: config.std,
-            vision_backend: resolve_backend_strict(config.runtime.vision_backend)?,
+            vision_backend: det_vision_backend,
         };
         let post = DbPostProcess {
             thresh: config.thresh,

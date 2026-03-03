@@ -127,7 +127,9 @@ impl CtcLabelDecoder {
                 text.push_str(ch);
             }
 
-            let mean_conf = round5(conf_list.iter().sum::<f32>() / conf_list.len() as f32);
+            // Keep parity near text_score threshold by aggregating in f64 before round-to-5.
+            let sum_conf: f64 = conf_list.iter().map(|v| f64::from(*v)).sum();
+            let mean_conf = round5_f64(sum_conf / conf_list.len() as f64);
 
             if return_word_box {
                 let mut info = get_word_info(&text, &selection);
@@ -288,6 +290,10 @@ fn has_chinese_char(ch: char) -> bool {
 
 fn round5(v: f32) -> f32 {
     (v * 100_000.0).round_ties_even() / 100_000.0
+}
+
+fn round5_f64(v: f64) -> f32 {
+    ((v * 100_000.0).round_ties_even() / 100_000.0) as f32
 }
 
 #[cfg(test)]
