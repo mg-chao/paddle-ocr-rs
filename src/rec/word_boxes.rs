@@ -6,12 +6,14 @@ use opencv::{
     prelude::*,
 };
 
+#[cfg(test)]
+use crate::vision::backend::default_backend;
 use crate::{
     Quad,
     config::{RecImage, VisionBackend},
     error::{PaddleOcrError, Result},
     types::{LineResult, WordBox, WordInfo, WordType},
-    vision::backend::{default_backend, resolve_backend_strict},
+    vision::backend::resolve_backend_strict,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +22,7 @@ enum Direction {
     Vertical,
 }
 
+#[cfg(test)]
 pub fn compute_word_boxes(
     imgs: &[RecImage],
     dt_boxes: &[Quad],

@@ -1,7 +1,6 @@
 use geo_clipper::{ClipperInt, EndType as ClipperEndType, JoinType as ClipperJoinType};
 use geo_types::{Coord, LineString, Polygon};
-use image::GrayImage;
-use imageproc::contours::find_contours;
+#[cfg(test)]
 use ndarray::Array2;
 use ndarray::ArrayView2;
 #[cfg(feature = "opencv-backend")]
@@ -44,6 +43,7 @@ impl Default for DbPostProcess {
 }
 
 impl DbPostProcess {
+    #[cfg(test)]
     pub fn run(&self, pred: &Array2<f32>, src_w: usize, src_h: usize) -> (Vec<Quad>, Vec<f32>) {
         self.run_view(pred.view(), src_w, src_h)
     }
@@ -173,17 +173,21 @@ impl DbPostProcess {
             dest_w,
             dest_h,
         };
+        #[cfg(feature = "opencv-backend")]
+        let pred_mat = pred_view_to_mat(pred);
 
-        let debug_enabled = db_debug_enabled();
         const PARALLEL_CANDIDATE_THRESHOLD: usize = 12;
-        let run_parallel = !debug_enabled
-            && num_candidates >= PARALLEL_CANDIDATE_THRESHOLD
-            && rayon::current_num_threads() > 1;
+        let run_parallel =
+            num_candidates >= PARALLEL_CANDIDATE_THRESHOLD && rayon::current_num_threads() > 1;
+        #[cfg(feature = "opencv-backend")]
+        let run_parallel = run_parallel && pred_mat.is_none();
         if !run_parallel {
             let mut scratch = CandidateScratch::default();
             for (i, contour) in contours.iter().take(num_candidates).enumerate() {
                 if let Some((box1, score)) = self.process_contour_candidate_pure(
                     pred,
+                    #[cfg(feature = "opencv-backend")]
+                    pred_mat.as_ref(),
                     contour,
                     i,
                     &scale_target,
@@ -200,7 +204,15 @@ impl DbPostProcess {
             .par_iter()
             .enumerate()
             .map_init(CandidateScratch::default, |scratch, (i, contour)| {
-                self.process_contour_candidate_pure(pred, contour, i, &scale_target, scratch)
+                self.process_contour_candidate_pure(
+                    pred,
+                    #[cfg(feature = "opencv-backend")]
+                    None,
+                    contour,
+                    i,
+                    &scale_target,
+                    scratch,
+                )
             })
             .collect();
 
@@ -215,8 +227,9 @@ impl DbPostProcess {
     fn process_contour_candidate_pure(
         &self,
         pred: ArrayView2<'_, f32>,
+        #[cfg(feature = "opencv-backend")] pred_mat: Option<&Mat>,
         contour: &[[i32; 2]],
-        contour_idx: usize,
+        _contour_idx: usize,
         scale_target: &ScaleTarget,
         scratch: &mut CandidateScratch,
     ) -> Option<(Quad, f32)> {
@@ -230,22 +243,53 @@ impl DbPostProcess {
             .extend(contour.iter().map(|p| [p[0] as f32, p[1] as f32]));
         let (points, sside) = mini_box_from_points_pure(&scratch.contour_f)?;
         #[cfg(feature = "opencv-backend")]
-        let (points, sside) =
-            if let Ok(Some((opencv_points, opencv_sside))) =
-                mini_box_from_points_opencv(&scratch.contour_f)
-            {
-                (opencv_points, opencv_sside)
-            } else {
-                (points, sside)
-            };
+        let (points, sside) = if let Ok(Some((opencv_points, opencv_sside))) =
+            mini_box_from_points_opencv(&scratch.contour_f)
+        {
+            (opencv_points, opencv_sside)
+        } else {
+            (points, sside)
+        };
         if sside < self.min_size as f32 {
             return None;
         }
 
         let score = if self.score_mode.eq_ignore_ascii_case("slow") {
-            contour_score_pure_with_scratch(pred, contour, scratch)
+            #[cfg(feature = "opencv-backend")]
+            {
+                if let Some(mat) = pred_mat {
+                    let mut contour_cv = Vector::<Point>::new();
+                    for p in contour {
+                        contour_cv.push(Point::new(p[0], p[1]));
+                    }
+                    match contour_score_opencv(mat, &contour_cv) {
+                        Ok(v) => v,
+                        Err(_) => contour_score_pure_with_scratch(pred, contour, scratch),
+                    }
+                } else {
+                    contour_score_pure_with_scratch(pred, contour, scratch)
+                }
+            }
+            #[cfg(not(feature = "opencv-backend"))]
+            {
+                contour_score_pure_with_scratch(pred, contour, scratch)
+            }
         } else {
-            box_score_fast_pure_with_scratch(pred, &points, scratch)
+            #[cfg(feature = "opencv-backend")]
+            {
+                if let Some(mat) = pred_mat {
+                    match box_score_fast_opencv(mat, &points) {
+                        Ok(v) => v,
+                        Err(_) => box_score_fast_pure_with_scratch(pred, &points, scratch),
+                    }
+                } else {
+                    box_score_fast_pure_with_scratch(pred, &points, scratch)
+                }
+            }
+            #[cfg(not(feature = "opencv-backend"))]
+            {
+                box_score_fast_pure_with_scratch(pred, &points, scratch)
+            }
         };
         if self.box_thresh > score {
             return None;
@@ -258,13 +302,14 @@ impl DbPostProcess {
 
         let (box1, sside2) = mini_box_from_points_pure(&scratch.expanded)?;
         #[cfg(feature = "opencv-backend")]
-        let (box1, sside2) = if let Ok(Some((opencv_box, opencv_sside2))) =
+        let (mut box1, sside2) = if let Ok(Some((opencv_box, opencv_sside2))) =
             mini_box_from_points_opencv(&scratch.expanded)
         {
             (opencv_box, opencv_sside2)
         } else {
             (box1, sside2)
         };
+        #[cfg(not(feature = "opencv-backend"))]
         let mut box1 = box1;
         if sside2 < self.min_size as f32 + 2.0 {
             return None;
@@ -276,19 +321,6 @@ impl DbPostProcess {
             scale_target.dest_w,
             scale_target.dest_h,
         );
-        if db_debug_enabled() {
-            let preview_len = scratch.expanded.len().min(24);
-            eprintln!(
-                "[db-debug][pure] cand={} score={:.10} p0={:?} p1={:?} p2={:?} p3={:?} box={:?}",
-                contour_idx, score, points[0], points[1], points[2], points[3], box1
-            );
-            eprintln!(
-                "[db-debug][pure] cand={} expanded_len={} expanded_first={:?}",
-                contour_idx,
-                scratch.expanded.len(),
-                &scratch.expanded[..preview_len]
-            );
-        }
         Some((box1, score))
     }
 
@@ -358,19 +390,6 @@ impl DbPostProcess {
             }
 
             scale_box_to_dest(&mut box1, bitmap_w, bitmap_h, dest_w, dest_h);
-            if db_debug_enabled() {
-                let preview_len = expanded.len().min(24);
-                eprintln!(
-                    "[db-debug][opencv] cand={} score={:.10} p0={:?} p1={:?} p2={:?} p3={:?} box={:?}",
-                    i, score, points[0], points[1], points[2], points[3], box1
-                );
-                eprintln!(
-                    "[db-debug][opencv] cand={} expanded_len={} expanded_first={:?}",
-                    i,
-                    expanded.len(),
-                    &expanded[..preview_len]
-                );
-            }
             boxes.push(box1);
             scores.push(score);
         }
@@ -379,16 +398,11 @@ impl DbPostProcess {
     }
 }
 
-fn db_debug_enabled() -> bool {
-    std::env::var_os("RAPIDOCR_DB_DEBUG").is_some()
-}
-
 #[derive(Default)]
 struct CandidateScratch {
     contour_f: Vec<[f32; 2]>,
     shifted_poly: Vec<[f32; 2]>,
     mask: Vec<u8>,
-    mask_dilated: Vec<u8>,
     expanded: Vec<[f32; 2]>,
 }
 
@@ -582,116 +596,283 @@ fn find_contours_from_mask_pure(mask: Vec<u8>, width: usize, height: usize) -> V
         return Vec::new();
     }
 
-    // OpenCV parity (contours_new.cpp):
-    // 1) copyMakeBorder(image, 1,1,1,1, BORDER_CONSTANT=0)
-    // 2) threshold(..., 0, 1, THRESH_BINARY) semantics
-    // 3) findContours(..., offset + Point(-1,-1))
+    // Mirror cv::findContours preprocess path:
+    // 1) copyMakeBorder(..., 1,1,1,1, BORDER_CONSTANT=0)
+    // 2) threshold(..., 0, 1, THRESH_BINARY)
     let pad_w = width + 2;
     let pad_h = height + 2;
-    let mut padded = vec![0_u8; pad_w * pad_h];
+    let mut image = vec![0_i8; pad_w * pad_h];
     for y in 0..height {
-        let src_row = &mask[y * width..(y + 1) * width];
-        let dst_row = &mut padded[(y + 1) * pad_w + 1..(y + 1) * pad_w + 1 + width];
-        for (dst, src) in dst_row.iter_mut().zip(src_row.iter()) {
-            *dst = if *src > 0 { 1 } else { 0 };
+        let src = &mask[y * width..(y + 1) * width];
+        let dst_row = &mut image[(y + 1) * pad_w + 1..(y + 1) * pad_w + 1 + width];
+        for (dst, src_v) in dst_row.iter_mut().zip(src.iter()) {
+            *dst = if *src_v > 0 { MASK8_BLACK as i8 } else { 0_i8 };
         }
     }
 
-    let Some(gray) = GrayImage::from_raw(pad_w as u32, pad_h as u32, padded) else {
-        return Vec::new();
-    };
-
-    let contours = find_contours::<i32>(&gray);
-    if contours.len() >= 64 && rayon::current_num_threads() > 1 {
-        return contours
-            .into_par_iter()
-            .filter_map(|c| {
-                if c.points.len() < 3 {
-                    return None;
-                }
-                let mut pts = Vec::with_capacity(c.points.len());
-                for p in c.points {
-                    let x = p.x - 1;
-                    let y = p.y - 1;
-                    if x < 0 || x >= width as i32 || y < 0 || y >= height as i32 {
-                        continue;
-                    }
-                    pts.push([x, y]);
-                }
-                let pts = chain_approx_simple(&pts);
-                if pts.len() >= 3 { Some(pts) } else { None }
-            })
-            .collect();
-    }
-
-    let mut out = Vec::with_capacity(contours.len());
-    for c in contours {
-        if c.points.len() < 3 {
-            continue;
-        }
-        let mut pts = Vec::with_capacity(c.points.len());
-        for p in c.points {
-            let x = p.x - 1;
-            let y = p.y - 1;
-            if x < 0 || x >= width as i32 || y < 0 || y >= height as i32 {
-                continue;
-            }
-            pts.push([x, y]);
-        }
-        let pts = chain_approx_simple(&pts);
-        if pts.len() >= 3 {
-            out.push(pts);
-        }
+    let mut scanner = CvContourScanner8::new(image, pad_w, pad_h, -1, -1);
+    let mut out = Vec::new();
+    while let Some(contour) = scanner.find_next_contour() {
+        out.push(contour);
     }
     out
 }
 
-fn chain_approx_simple(points: &[[i32; 2]]) -> Vec<[i32; 2]> {
-    if points.len() <= 2 {
-        return points.to_vec();
-    }
+const MASK8_RIGHT: i32 = -128; // 0x80 as signed char
+const MASK8_NEW: i32 = 2; // 0x02
+const MASK8_FLAGS: i32 = -2; // 0xFE as signed char
+const MASK8_BLACK: i32 = 1; // 0x01
 
-    let mut dedup = Vec::with_capacity(points.len());
-    for &p in points {
-        if dedup.last().copied() != Some(p) {
-            dedup.push(p);
+const CHAIN_DELTAS: [[i32; 2]; 8] = [
+    [1, 0],
+    [1, -1],
+    [0, -1],
+    [-1, -1],
+    [-1, 0],
+    [-1, 1],
+    [0, 1],
+    [1, 1],
+];
+
+#[inline]
+fn chain_delta_index(dir: i32, step: usize) -> isize {
+    let d = CHAIN_DELTAS[(dir & 7) as usize];
+    d[0] as isize + d[1] as isize * step as isize
+}
+
+#[derive(Debug)]
+struct CvContourScanner8 {
+    image: Vec<i8>,
+    width: usize,
+    height: usize,
+    offset_x: i32,
+    offset_y: i32,
+    pt_x: usize,
+    pt_y: usize,
+    lnbd_x: usize,
+    lnbd_y: usize,
+    nbd: i32,
+}
+
+impl CvContourScanner8 {
+    fn new(image: Vec<i8>, width: usize, height: usize, offset_x: i32, offset_y: i32) -> Self {
+        Self {
+            image,
+            width,
+            height,
+            offset_x,
+            offset_y,
+            pt_x: 1,
+            pt_y: 1,
+            lnbd_x: 0,
+            lnbd_y: 1,
+            nbd: 2,
         }
     }
 
-    if dedup.len() > 1 && dedup.first() == dedup.last() {
-        dedup.pop();
+    #[inline]
+    fn idx(&self, x: usize, y: usize) -> usize {
+        y * self.width + x
     }
 
-    if dedup.len() <= 2 {
-        return dedup;
+    #[inline]
+    fn at_i32(&self, x: usize, y: usize) -> i32 {
+        self.image[self.idx(x, y)] as i32
     }
 
-    let n = dedup.len();
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let prev = dedup[(i + n - 1) % n];
-        let curr = dedup[i];
-        let next = dedup[(i + 1) % n];
+    fn find_next_x(
+        &self,
+        mut x: usize,
+        y: usize,
+        prev: i32,
+        p_out: &mut i32,
+        width_bound: usize,
+    ) -> usize {
+        while x < width_bound {
+            let p = self.at_i32(x, y);
+            *p_out = p;
+            if p != prev {
+                return x;
+            }
+            x += 1;
+        }
+        x
+    }
 
-        let v1 = [curr[0] - prev[0], curr[1] - prev[1]];
-        let v2 = [next[0] - curr[0], next[1] - curr[1]];
-        if v1 == [0, 0] || v2 == [0, 0] {
-            continue;
+    fn find_next_contour(&mut self) -> Option<Vec<[i32; 2]>> {
+        if self.width < 2 || self.height < 2 {
+            return None;
         }
 
-        let dir1 = [v1[0].signum(), v1[1].signum()];
-        let dir2 = [v2[0].signum(), v2[1].signum()];
-
-        let cross = i64::from(v1[0]) * i64::from(v2[1]) - i64::from(v1[1]) * i64::from(v2[0]);
-        let dot = i64::from(v1[0]) * i64::from(v2[0]) + i64::from(v1[1]) * i64::from(v2[1]);
-        let is_straight = dir1 == dir2 || (cross == 0 && dot >= 0);
-
-        if !is_straight {
-            out.push(curr);
+        let width_bound = self.width - 1;
+        let height_bound = self.height - 1;
+        let mut x = self.pt_x;
+        let mut y = self.pt_y;
+        if y >= self.height || x >= self.width {
+            return None;
         }
+
+        let mut last_pos_x = self.lnbd_x as i32;
+        let mut last_pos_y = self.lnbd_y as i32;
+        let mut prev = self.at_i32(x.saturating_sub(1), y);
+
+        while y < height_bound {
+            let mut p = 0_i32;
+            while x < width_bound {
+                x = self.find_next_x(x, y, prev, &mut p, width_bound);
+                if x >= width_bound {
+                    break;
+                }
+
+                if let Some(contour) = self.contour_scan(prev, p, &mut last_pos_x, x, y) {
+                    self.lnbd_x = last_pos_x.max(0) as usize;
+                    self.lnbd_y = last_pos_y.max(0) as usize;
+                    return Some(contour);
+                }
+
+                prev = p;
+                if (prev & MASK8_FLAGS) != 0 {
+                    last_pos_x = x as i32;
+                }
+                x += 1;
+            }
+
+            y += 1;
+            if y >= height_bound {
+                break;
+            }
+            x = 1;
+            prev = 0;
+            last_pos_x = 0;
+            last_pos_y = y as i32;
+        }
+
+        None
     }
 
-    if out.len() >= 3 { out } else { dedup }
+    fn contour_scan(
+        &mut self,
+        prev: i32,
+        p: i32,
+        last_pos_x: &mut i32,
+        x: usize,
+        y: usize,
+    ) -> Option<Vec<[i32; 2]>> {
+        let mut is_hole = false;
+
+        // RETR_LIST + 8-bit logic from contours_new.cpp::contourScan
+        if !(prev == 0 && p == MASK8_BLACK) {
+            if p != 0 || prev < MASK8_BLACK {
+                return None;
+            }
+            if (prev & MASK8_FLAGS) != 0 {
+                *last_pos_x = x as i32 - 1;
+            }
+            is_hole = true;
+        }
+
+        *last_pos_x = x as i32 - if is_hole { 1 } else { 0 };
+        let mut nbd_ = self.nbd;
+        let contour = self.make_contour(&mut nbd_, is_hole, x as i32, y as i32);
+        self.pt_x = x + 1;
+        self.pt_y = y;
+        self.nbd = nbd_;
+        Some(contour)
+    }
+
+    fn make_contour(&mut self, _nbd: &mut i32, is_hole: bool, x: i32, y: i32) -> Vec<[i32; 2]> {
+        let start_x = x - if is_hole { 1 } else { 0 };
+        let start_y = y;
+        let origin_x = start_x + self.offset_x;
+        let origin_y = start_y + self.offset_y;
+        self.fetch_contour_ex(
+            [start_x as usize, start_y as usize],
+            is_hole,
+            false,
+            [origin_x, origin_y],
+            MASK8_NEW,
+        )
+    }
+
+    fn fetch_contour_ex(
+        &mut self,
+        start: [usize; 2],
+        is_hole: bool,
+        is_direct: bool,
+        pt: [i32; 2],
+        nbd: i32,
+    ) -> Vec<[i32; 2]> {
+        let start_x = start[0];
+        let start_y = start[1];
+        let mut pt_x = pt[0];
+        let mut pt_y = pt[1];
+        let step = self.width;
+        let i0 = self.idx(start_x, start_y) as isize;
+        let mut points = Vec::<[i32; 2]>::new();
+
+        let mut s_end: i32 = if is_hole { 0 } else { 4 };
+        let mut s = s_end;
+        let i1: isize;
+        loop {
+            s = (s - 1) & 7;
+            let ni = i0 + chain_delta_index(s, step);
+            if self.image[ni as usize] != 0 || s == s_end {
+                i1 = ni;
+                break;
+            }
+        }
+
+        if s == s_end {
+            self.image[i0 as usize] = (nbd | MASK8_RIGHT) as i8;
+            points.push([pt_x, pt_y]);
+            return points;
+        }
+
+        let mut i3 = i0;
+        let mut prev_s = s ^ 4;
+        loop {
+            s_end = s;
+            s = s.min(15);
+            let i4: isize;
+            loop {
+                if s >= 15 {
+                    i4 = i3 + chain_delta_index(s, step);
+                    break;
+                }
+                s += 1;
+                let ni = i3 + chain_delta_index(s, step);
+                if self.image[ni as usize] != 0 {
+                    i4 = ni;
+                    break;
+                }
+            }
+            s &= 7;
+
+            if ((s - 1) as u32) < (s_end as u32) {
+                self.image[i3 as usize] = (nbd | MASK8_RIGHT) as i8;
+            } else if self.image[i3 as usize] as i32 == MASK8_BLACK {
+                self.image[i3 as usize] = nbd as i8;
+            }
+
+            if s != prev_s || is_direct {
+                points.push([pt_x, pt_y]);
+            }
+
+            prev_s = s;
+            let d = CHAIN_DELTAS[s as usize];
+            pt_x += d[0];
+            pt_y += d[1];
+
+            if i4 == i0 && i3 == i1 {
+                break;
+            }
+
+            i3 = i4;
+            s = (s + 4) & 7;
+        }
+
+        points
+    }
 }
 
 fn dilate_mask_2x2(mask: &[u8], width: usize, height: usize) -> Vec<u8> {
@@ -724,38 +905,6 @@ fn dilate_mask_2x2(mask: &[u8], width: usize, height: usize) -> Vec<u8> {
     });
 
     out
-}
-
-fn dilate_mask_2x2_local<'a>(
-    src: &[u8],
-    width: usize,
-    height: usize,
-    scratch: &'a mut Vec<u8>,
-) -> &'a [u8] {
-    if width == 0 || height == 0 {
-        scratch.clear();
-        return scratch.as_slice();
-    }
-
-    let len = width * height;
-    if scratch.len() < len {
-        scratch.resize(len, 0);
-    }
-    let dst = &mut scratch[..len];
-
-    for y in 0..height {
-        let row_start = y * width;
-        let cur = &src[row_start..row_start + width];
-        let prev = if y == 0 {
-            None
-        } else {
-            Some(&src[row_start - width..row_start])
-        };
-        let row = &mut dst[row_start..row_start + width];
-        dilate_row_2x2_scalar(cur, prev, row);
-    }
-
-    dst
 }
 
 #[inline]
@@ -942,6 +1091,21 @@ fn box_score_fast_pure(bitmap: ArrayView2<'_, f32>, box_points: &[[f32; 2]]) -> 
     box_score_fast_pure_with_scratch(bitmap, box_points, &mut scratch)
 }
 
+#[cfg(feature = "opencv-backend")]
+fn pred_view_to_mat(pred: ArrayView2<'_, f32>) -> Option<Mat> {
+    let height = pred.nrows();
+    let values: Vec<f32> = if let Some(src) = pred.as_slice_memory_order() {
+        src.to_vec()
+    } else {
+        pred.iter().copied().collect()
+    };
+    let pred_1d = Mat::from_slice(&values).ok()?;
+    let pred_ref = pred_1d.reshape(1, height as i32).ok()?;
+    let mut pred_mat = Mat::default();
+    pred_ref.copy_to(&mut pred_mat).ok()?;
+    Some(pred_mat)
+}
+
 fn box_score_fast_pure_with_scratch(
     bitmap: ArrayView2<'_, f32>,
     box_points: &[[f32; 2]],
@@ -991,15 +1155,7 @@ fn box_score_fast_pure_with_scratch(
     }
     let mask = &mut scratch.mask[..mask_len];
     fill_polygon_mask(mask, local_w, local_h, &scratch.shifted_poly);
-    let dilated_mask = dilate_mask_2x2_local(mask, local_w, local_h, &mut scratch.mask_dilated);
-    masked_mean_in_roi(
-        bitmap,
-        xmin as usize,
-        ymin as usize,
-        local_w,
-        local_h,
-        dilated_mask,
-    )
+    masked_mean_in_roi(bitmap, xmin as usize, ymin as usize, local_w, local_h, mask)
 }
 
 #[cfg(feature = "opencv-backend")]
@@ -1433,7 +1589,7 @@ fn min_area_rect_from_points_pure(points: &[[f32; 2]]) -> Option<PureRotatedRect
         return None;
     }
 
-    let hull = convex_hull(points);
+    let hull = convex_hull_like_opencv(points, false);
     if hull.is_empty() {
         return None;
     }
@@ -1449,11 +1605,9 @@ fn min_area_rect_from_points_pure(points: &[[f32; 2]]) -> Option<PureRotatedRect
 
         // OpenCV parity: compute lengths/angle in double precision and cast to float.
         let mut width =
-            (((vec2[0] as f64 * vec2[0] as f64) + (vec2[1] as f64 * vec2[1] as f64)).sqrt())
-                as f32;
+            (((vec2[0] as f64 * vec2[0] as f64) + (vec2[1] as f64 * vec2[1] as f64)).sqrt()) as f32;
         let mut height =
-            (((vec1[0] as f64 * vec1[0] as f64) + (vec1[1] as f64 * vec1[1] as f64)).sqrt())
-                as f32;
+            (((vec1[0] as f64 * vec1[0] as f64) + (vec1[1] as f64 * vec1[1] as f64)).sqrt()) as f32;
         let special_case_vertical = vec1[0] == 0.0 && vec1[1] > 0.0;
         if special_case_vertical {
             std::mem::swap(&mut width, &mut height);
@@ -1674,49 +1828,275 @@ fn rotated_rect_to_points_pure(rect: PureRotatedRect) -> Quad {
     ]
 }
 
-fn convex_hull(points: &[[f32; 2]]) -> Vec<[f32; 2]> {
-    let mut pts = points.to_vec();
-    pts.sort_by(|a, b| a[0].total_cmp(&b[0]).then_with(|| a[1].total_cmp(&b[1])));
-    pts.dedup_by(|a, b| (a[0] - b[0]).abs() <= f32::EPSILON && (a[1] - b[1]).abs() <= f32::EPSILON);
-
-    if pts.len() <= 1 {
-        return pts;
+#[inline]
+fn cv_sign(v: f64) -> i32 {
+    if v > 0.0 {
+        1
+    } else if v < 0.0 {
+        -1
+    } else {
+        0
     }
-
-    let mut lower: Vec<[f32; 2]> = Vec::new();
-    for p in &pts {
-        while lower.len() >= 2 {
-            let l = lower.len();
-            if cross(lower[l - 2], lower[l - 1], *p) <= 0.0 {
-                lower.pop();
-            } else {
-                break;
-            }
-        }
-        lower.push(*p);
-    }
-
-    let mut upper: Vec<[f32; 2]> = Vec::new();
-    for p in pts.iter().rev() {
-        while upper.len() >= 2 {
-            let l = upper.len();
-            if cross(upper[l - 2], upper[l - 1], *p) <= 0.0 {
-                upper.pop();
-            } else {
-                break;
-            }
-        }
-        upper.push(*p);
-    }
-
-    lower.pop();
-    upper.pop();
-    lower.extend(upper);
-    lower
 }
 
-fn cross(a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> f32 {
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+#[inline]
+fn normalize_vec2(v: [f32; 2]) -> [f32; 2] {
+    let n = ((v[0] as f64 * v[0] as f64) + (v[1] as f64 * v[1] as f64)).sqrt();
+    if n == 0.0 {
+        [0.0, 0.0]
+    } else {
+        [(v[0] as f64 / n) as f32, (v[1] as f64 / n) as f32]
+    }
+}
+
+fn sklansky_like_opencv(
+    points: &[[f32; 2]],
+    pointer: &[usize],
+    start: i32,
+    end: i32,
+    stack: &mut [i32],
+    nsign: i32,
+    sign2: i32,
+) -> usize {
+    let incr = if end > start { 1 } else { -1 };
+    let mut pprev = start;
+    let mut pcur = pprev + incr;
+    let mut pnext = pcur + incr;
+    let mut stacksize = 3_usize;
+
+    let p_start = points[pointer[start as usize]];
+    let p_end = points[pointer[end as usize]];
+    if start == end || (p_start[0] == p_end[0] && p_start[1] == p_end[1]) {
+        stack[0] = start;
+        return 1;
+    }
+
+    stack[0] = pprev;
+    stack[1] = pcur;
+    stack[2] = pnext;
+
+    let end_after = end + incr;
+    while pnext != end_after {
+        let cury = points[pointer[pcur as usize]][1];
+        let nexty = points[pointer[pnext as usize]][1];
+        let by = nexty - cury;
+
+        if cv_sign(by as f64) != nsign {
+            let pcur_pt = points[pointer[pcur as usize]];
+            let pprev_pt = points[pointer[pprev as usize]];
+            let pnext_pt = points[pointer[pnext as usize]];
+
+            let mut a = [pcur_pt[0] - pprev_pt[0], pcur_pt[1] - pprev_pt[1]];
+            let mut b = [pnext_pt[0] - pcur_pt[0], by];
+            a = normalize_vec2(a);
+            b = normalize_vec2(b);
+
+            let convexity = (a[1] as f64 * b[0] as f64) - (a[0] as f64 * b[1] as f64);
+            if cv_sign(convexity) == sign2 && (a[0] != 0.0 || a[1] != 0.0) {
+                pprev = pcur;
+                pcur = pnext;
+                pnext += incr;
+                stack[stacksize] = pnext;
+                stacksize += 1;
+            } else if pprev == start {
+                pcur = pnext;
+                stack[1] = pcur;
+                pnext += incr;
+                stack[2] = pnext;
+            } else {
+                stack[stacksize - 2] = pnext;
+                pcur = pprev;
+                pprev = stack[stacksize - 4];
+                stacksize -= 1;
+            }
+        } else {
+            pnext += incr;
+            stack[stacksize - 1] = pnext;
+        }
+    }
+
+    stacksize - 1
+}
+
+fn convex_hull_like_opencv(points: &[[f32; 2]], clockwise: bool) -> Vec<[f32; 2]> {
+    let total = points.len();
+    if total == 0 {
+        return Vec::new();
+    }
+
+    let mut pointer: Vec<usize> = (0..total).collect();
+    pointer.sort_by(|&a, &b| {
+        points[a][0]
+            .total_cmp(&points[b][0])
+            .then_with(|| points[a][1].total_cmp(&points[b][1]))
+            .then_with(|| a.cmp(&b))
+    });
+
+    let mut miny_ind = 0usize;
+    let mut maxy_ind = 0usize;
+    for i in 1..total {
+        let y = points[pointer[i]][1];
+        if points[pointer[miny_ind]][1] > y {
+            miny_ind = i;
+        }
+        if points[pointer[maxy_ind]][1] < y {
+            maxy_ind = i;
+        }
+    }
+
+    let mut hullbuf: Vec<i32> = Vec::with_capacity(total);
+    let p0 = points[pointer[0]];
+    let p_last = points[pointer[total - 1]];
+    if p0[0] == p_last[0] && p0[1] == p_last[1] {
+        hullbuf.push(0);
+    } else {
+        let mut tl_buf = vec![0_i32; total + 2];
+        let tl_count =
+            sklansky_like_opencv(points, &pointer, 0, maxy_ind as i32, &mut tl_buf, -1, 1);
+        let mut tr_buf = vec![0_i32; total + 2];
+        let tr_count = sklansky_like_opencv(
+            points,
+            &pointer,
+            total as i32 - 1,
+            maxy_ind as i32,
+            &mut tr_buf,
+            -1,
+            -1,
+        );
+
+        let mut tl_stack = tl_buf[..tl_count].to_vec();
+        let mut tr_stack = tr_buf[..tr_count].to_vec();
+        if !clockwise {
+            std::mem::swap(&mut tl_stack, &mut tr_stack);
+        }
+
+        if tl_stack.len() >= 2 {
+            for &idx in tl_stack.iter().take(tl_stack.len() - 1) {
+                hullbuf.push(idx);
+            }
+        }
+        if tr_stack.len() >= 2 {
+            for i in (1..tr_stack.len()).rev() {
+                hullbuf.push(tr_stack[i]);
+            }
+        }
+        let stop_idx = if tr_stack.len() > 2 {
+            tr_stack[1]
+        } else if tl_stack.len() > 2 {
+            tl_stack[tl_stack.len() - 2]
+        } else {
+            -1
+        };
+
+        let mut bl_buf = vec![0_i32; total + 2];
+        let bl_count =
+            sklansky_like_opencv(points, &pointer, 0, miny_ind as i32, &mut bl_buf, 1, -1);
+        let mut br_buf = vec![0_i32; total + 2];
+        let br_count = sklansky_like_opencv(
+            points,
+            &pointer,
+            total as i32 - 1,
+            miny_ind as i32,
+            &mut br_buf,
+            1,
+            1,
+        );
+        let mut bl_stack = bl_buf[..bl_count].to_vec();
+        let mut br_stack = br_buf[..br_count].to_vec();
+        if clockwise {
+            std::mem::swap(&mut bl_stack, &mut br_stack);
+        }
+
+        let mut bl_emit = bl_stack.len();
+        let mut br_emit = br_stack.len();
+        if stop_idx >= 0 {
+            let check_idx = if bl_stack.len() > 2 {
+                bl_stack[1]
+            } else if bl_stack.len() + br_stack.len() > 2 {
+                br_stack[2 - bl_stack.len()]
+            } else {
+                -1
+            };
+            if check_idx == stop_idx
+                || (check_idx >= 0
+                    && stop_idx >= 0
+                    && points[pointer[check_idx as usize]][0]
+                        == points[pointer[stop_idx as usize]][0]
+                    && points[pointer[check_idx as usize]][1]
+                        == points[pointer[stop_idx as usize]][1])
+            {
+                bl_emit = bl_emit.min(2);
+                br_emit = br_emit.min(2);
+            }
+        }
+
+        if bl_emit >= 2 {
+            for &idx in bl_stack.iter().take(bl_emit - 1) {
+                hullbuf.push(idx);
+            }
+        }
+        if br_emit >= 2 {
+            for i in (1..br_emit).rev() {
+                hullbuf.push(br_stack[i]);
+            }
+        }
+
+        for idx in &mut hullbuf {
+            *idx = pointer[*idx as usize] as i32;
+        }
+
+        let nout = hullbuf.len();
+        if nout >= 3 {
+            let mut min_idx = 0usize;
+            let mut max_idx = 0usize;
+            let mut lt = 0_i32;
+            for i in 1..nout {
+                let idx = hullbuf[i];
+                lt += i32::from(hullbuf[i - 1] < idx);
+                if lt > 1 && lt <= i as i32 - 2 {
+                    break;
+                }
+                if idx < hullbuf[min_idx] {
+                    min_idx = i;
+                }
+                if idx > hullbuf[max_idx] {
+                    max_idx = i;
+                }
+            }
+
+            let mmdist = (max_idx as i32 - min_idx as i32).unsigned_abs() as usize;
+            if (mmdist == 1 || mmdist == nout - 1)
+                && (lt <= 1 || lt >= nout.saturating_sub(2) as i32)
+            {
+                let ascending = (max_idx + 1) % nout == min_idx;
+                let i0 = if ascending { min_idx } else { max_idx };
+                if i0 > 0 {
+                    let mut rotated = vec![0_i32; nout];
+                    let mut j = i0;
+                    let mut i = 0usize;
+                    while i < nout {
+                        let curr_idx = hullbuf[j];
+                        rotated[i] = curr_idx;
+                        let next_j = if j + 1 < nout { j + 1 } else { 0 };
+                        let next_idx = hullbuf[next_j];
+                        if i < nout - 1 && (ascending != (curr_idx < next_idx)) {
+                            break;
+                        }
+                        j = next_j;
+                        i += 1;
+                    }
+                    if i == nout {
+                        hullbuf.copy_from_slice(&rotated);
+                    }
+                }
+            }
+        }
+    }
+
+    hullbuf
+        .into_iter()
+        .filter_map(|idx| points.get(idx as usize).copied())
+        .collect()
 }
 
 #[cfg(test)]
@@ -2069,6 +2449,87 @@ mod tests {
     use crate::config::VisionBackend;
     use ndarray::Array2;
 
+    #[cfg(feature = "opencv-backend")]
+    fn lcg_next(state: &mut u64) -> u64 {
+        // Numerical Recipes LCG constants are deterministic and sufficient here.
+        *state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        *state
+    }
+
+    #[cfg(feature = "opencv-backend")]
+    #[test]
+    fn pure_find_contours_matches_opencv_on_seeded_masks() {
+        let mut seed = 0xC0FFEE_u64;
+        let mut checked = 0usize;
+
+        for case_id in 0..1800usize {
+            let width = 5usize + (lcg_next(&mut seed) % 92) as usize;
+            let height = 5usize + (lcg_next(&mut seed) % 76) as usize;
+            let mut mask = vec![0_u8; width * height];
+
+            // Blend random noise with a few deterministic runs to hit corner cases.
+            for y in 0..height {
+                for x in 0..width {
+                    let rnd = (lcg_next(&mut seed) >> 24) as u8;
+                    let mut v = if rnd & 0b11 == 0 { 255_u8 } else { 0_u8 };
+                    if case_id % 7 == 0 && x > width / 3 && x < width * 2 / 3 {
+                        v = 255_u8;
+                    }
+                    if case_id % 11 == 0 && y > height / 3 && y < height * 2 / 3 {
+                        v = 255_u8;
+                    }
+                    if case_id % 13 == 0 && (x + y) % 9 == 0 {
+                        v = 255_u8;
+                    }
+                    if case_id % 17 == 0
+                        && x > 1
+                        && x + 2 < width
+                        && y > 1
+                        && y + 2 < height
+                        && (x * 3 + y * 5) % 19 == 0
+                    {
+                        v = 255_u8;
+                    }
+                    mask[y * width + x] = v;
+                }
+            }
+
+            // Ensure we cover both background and foreground.
+            if !mask.contains(&255) || !mask.contains(&0) {
+                continue;
+            }
+
+            let pure = super::find_contours_from_mask_pure(mask.clone(), width, height);
+            let opencv = super::find_contours_from_mask_opencv(&mask, height)
+                .expect("opencv findContours should succeed");
+            let mut cv_contours = Vec::<Vec<[i32; 2]>>::with_capacity(opencv.len());
+            for contour in opencv.iter() {
+                let mut pts = Vec::with_capacity(contour.len());
+                for p in contour.iter() {
+                    pts.push([p.x, p.y]);
+                }
+                cv_contours.push(pts);
+            }
+
+            let mut pure_sorted = pure;
+            let mut cv_sorted = cv_contours;
+            pure_sorted.sort();
+            cv_sorted.sort();
+
+            assert_eq!(
+                pure_sorted, cv_sorted,
+                "contour mismatch on case_id={case_id}, size={}x{}",
+                width, height
+            );
+            checked += 1;
+        }
+
+        assert!(
+            checked >= 900,
+            "not enough non-trivial contour cases were exercised"
+        );
+    }
+
     #[test]
     fn unclip_polygon_like_opencv_db_expands_square() {
         let square = [
@@ -2150,7 +2611,7 @@ mod tests {
     }
 
     #[test]
-    fn box_score_fast_quad_matches_dilated_mask_reference() {
+    fn box_score_fast_quad_matches_mask_reference() {
         let mut pred = Array2::<f32>::zeros((27, 39));
         for y in 0..pred.nrows() {
             for x in 0..pred.ncols() {
@@ -2193,18 +2654,17 @@ mod tests {
             }
             let mut mask = vec![0_u8; local_w * local_h];
             fill_polygon_mask(&mut mask, local_w, local_h, &shifted);
-            let dilated = dilate_mask_2x2(&mask, local_w, local_h);
             let reference = masked_mean_in_roi(
                 pred.view(),
                 xmin as usize,
                 ymin as usize,
                 local_w,
                 local_h,
-                &dilated,
+                &mask,
             );
             assert!(
                 (fast - reference).abs() <= 1e-6,
-                "quad score mismatch (dilated mask): fast={fast} ref={reference} quad={quad:?}"
+                "quad score mismatch (mask): fast={fast} ref={reference} quad={quad:?}"
             );
         }
     }

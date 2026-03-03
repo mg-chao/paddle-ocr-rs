@@ -1,10 +1,6 @@
-use ndarray::{Array2, ArrayView2};
+use ndarray::ArrayView2;
 
 use crate::error::{PaddleOcrError, Result};
-
-pub fn decode(preds: &Array2<f32>, label_list: &[String]) -> Result<Vec<(String, f32)>> {
-    decode_view(preds.view(), label_list)
-}
 
 pub fn decode_view(
     preds: ArrayView2<'_, f32>,

@@ -1,9 +1,7 @@
 use std::path::Path;
 use std::thread;
 
-use ndarray::{
-    Array2, Array3, Array4, ArrayD, ArrayView2, ArrayView3, ArrayView4, ArrayViewD, Ix2, Ix3, Ix4,
-};
+use ndarray::{ArrayView2, ArrayView3, ArrayView4, ArrayViewD, Ix2, Ix3, Ix4};
 use ort::{
     inputs,
     session::{Session, builder::GraphOptimizationLevel},
@@ -23,7 +21,6 @@ pub struct OrtSession {
     session: Session,
     model_path: String,
     provider_resolution: ProviderResolution,
-    pub input_names: Vec<String>,
     pub output_names: Vec<String>,
     pub character_list: Option<Vec<String>>,
 }
@@ -33,7 +30,6 @@ pub enum SessionContract {
     Rec,
     Cls,
     Det,
-    Generic,
 }
 
 impl OrtSession {
@@ -76,7 +72,6 @@ impl OrtSession {
         let session = builder.commit_from_file(model_path)?;
         validate_model_io_contract(model_path, &session, contract)?;
 
-        let input_names = session.inputs.iter().map(|v| v.name.clone()).collect();
         let output_names = session.outputs.iter().map(|v| v.name.clone()).collect();
 
         let character_list = match session.metadata()?.custom("character")? {
@@ -90,7 +85,6 @@ impl OrtSession {
             session,
             model_path: model_path.display().to_string(),
             provider_resolution: provider_chain.resolution,
-            input_names,
             output_names,
             character_list,
         })
@@ -98,10 +92,6 @@ impl OrtSession {
 
     pub fn provider_resolution(&self) -> ProviderResolution {
         self.provider_resolution
-    }
-
-    pub fn run(&mut self, input: Array4<f32>) -> Result<Array3<f32>> {
-        self.run_array3(input)
     }
 
     pub fn run_arrayd_view_with<T, F>(&mut self, input: ArrayView4<'_, f32>, f: F) -> Result<T>
@@ -131,59 +121,6 @@ impl OrtSession {
             ))
         })?;
         f(arr.view())
-    }
-
-    pub fn run_arrayd_view(&mut self, input: ArrayView4<'_, f32>) -> Result<ArrayD<f32>> {
-        self.run_arrayd_view_with(input, |arr| Ok(arr.to_owned()))
-    }
-
-    pub fn run_arrayd(&mut self, input: Array4<f32>) -> Result<ArrayD<f32>> {
-        self.run_arrayd_view(input.view())
-    }
-
-    pub fn run_array2_view(&mut self, input: ArrayView4<'_, f32>) -> Result<Array2<f32>> {
-        self.run_array2_view_with(input, |arr| Ok(arr.to_owned()))
-    }
-
-    pub fn run_array3_view(&mut self, input: ArrayView4<'_, f32>) -> Result<Array3<f32>> {
-        self.run_array3_view_with(input, |arr| Ok(arr.to_owned()))
-    }
-
-    pub fn run_array4_view(&mut self, input: ArrayView4<'_, f32>) -> Result<Array4<f32>> {
-        self.run_array4_view_with(input, |arr| Ok(arr.to_owned()))
-    }
-
-    pub fn run_array2(&mut self, input: Array4<f32>) -> Result<Array2<f32>> {
-        self.run_arrayd(input)?
-            .into_dimensionality::<Ix2>()
-            .map_err(|e| {
-                PaddleOcrError::Decode(format!(
-                    "unexpected output rank for model {}: expected rank2: {e}",
-                    self.model_path
-                ))
-            })
-    }
-
-    pub fn run_array3(&mut self, input: Array4<f32>) -> Result<Array3<f32>> {
-        self.run_arrayd(input)?
-            .into_dimensionality::<Ix3>()
-            .map_err(|e| {
-                PaddleOcrError::Decode(format!(
-                    "unexpected output rank for model {}: expected rank3: {e}",
-                    self.model_path
-                ))
-            })
-    }
-
-    pub fn run_array4(&mut self, input: Array4<f32>) -> Result<Array4<f32>> {
-        self.run_arrayd(input)?
-            .into_dimensionality::<Ix4>()
-            .map_err(|e| {
-                PaddleOcrError::Decode(format!(
-                    "unexpected output rank for model {}: expected rank4: {e}",
-                    self.model_path
-                ))
-            })
     }
 
     pub fn run_array2_view_with<T, F>(&mut self, input: ArrayView4<'_, f32>, f: F) -> Result<T>
@@ -295,7 +232,6 @@ fn validate_model_io_contract(
         SessionContract::Rec => Some(3),
         SessionContract::Cls => Some(2),
         SessionContract::Det => Some(4),
-        SessionContract::Generic => None,
     };
     validate_tensor_spec(
         model_path,

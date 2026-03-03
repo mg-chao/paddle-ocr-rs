@@ -80,27 +80,18 @@ fn resolve_cuda_execution_providers(
     cpu_provider: ExecutionProviderDispatch,
     fail_if_provider_unavailable: bool,
 ) -> Result<ProviderChain> {
-    let device_id_i32 = device_id_to_i32("CUDA", device_id)?;
-    let cuda_provider = CUDAExecutionProvider::default().with_device_id(device_id_i32);
-    let is_available = cuda_provider.is_available()?;
-    let resolution = decide_provider_resolution(
+    resolve_accelerator_execution_providers(
+        "CUDA",
         ProviderPreference::Cuda { device_id },
         ResolvedExecutionProvider::Cuda,
-        is_available,
+        device_id,
+        cpu_provider,
         fail_if_provider_unavailable,
-    )?;
-
-    if resolution.fallback_used {
-        Ok(ProviderChain {
-            providers: vec![cpu_provider],
-            resolution,
-        })
-    } else {
-        Ok(ProviderChain {
-            providers: vec![cuda_provider.build(), cpu_provider],
-            resolution,
-        })
-    }
+        |id| {
+            let provider = CUDAExecutionProvider::default().with_device_id(id);
+            Ok((provider.is_available()?, provider.build()))
+        },
+    )
 }
 
 fn resolve_directml_execution_providers(
@@ -108,28 +99,18 @@ fn resolve_directml_execution_providers(
     cpu_provider: ExecutionProviderDispatch,
     fail_if_provider_unavailable: bool,
 ) -> Result<ProviderChain> {
-    let device_id_i32 = device_id_to_i32("DirectML", device_id)?;
-
-    let dml_provider = DirectMLExecutionProvider::default().with_device_id(device_id_i32);
-    let is_available = dml_provider.is_available()?;
-    let resolution = decide_provider_resolution(
+    resolve_accelerator_execution_providers(
+        "DirectML",
         ProviderPreference::DirectMl { device_id },
         ResolvedExecutionProvider::DirectMl,
-        is_available,
+        device_id,
+        cpu_provider,
         fail_if_provider_unavailable,
-    )?;
-
-    if resolution.fallback_used {
-        Ok(ProviderChain {
-            providers: vec![cpu_provider],
-            resolution,
-        })
-    } else {
-        Ok(ProviderChain {
-            providers: vec![dml_provider.build(), cpu_provider],
-            resolution,
-        })
-    }
+        |id| {
+            let provider = DirectMLExecutionProvider::default().with_device_id(id);
+            Ok((provider.is_available()?, provider.build()))
+        },
+    )
 }
 
 fn resolve_cann_execution_providers(
@@ -137,12 +118,37 @@ fn resolve_cann_execution_providers(
     cpu_provider: ExecutionProviderDispatch,
     fail_if_provider_unavailable: bool,
 ) -> Result<ProviderChain> {
-    let device_id_i32 = device_id_to_i32("CANN", device_id)?;
-    let cann_provider = CANNExecutionProvider::default().with_device_id(device_id_i32);
-    let is_available = cann_provider.is_available()?;
-    let resolution = decide_provider_resolution(
+    resolve_accelerator_execution_providers(
+        "CANN",
         ProviderPreference::Cann { device_id },
         ResolvedExecutionProvider::Cann,
+        device_id,
+        cpu_provider,
+        fail_if_provider_unavailable,
+        |id| {
+            let provider = CANNExecutionProvider::default().with_device_id(id);
+            Ok((provider.is_available()?, provider.build()))
+        },
+    )
+}
+
+fn resolve_accelerator_execution_providers<F>(
+    provider_name: &str,
+    requested: ProviderPreference,
+    preferred: ResolvedExecutionProvider,
+    device_id: usize,
+    cpu_provider: ExecutionProviderDispatch,
+    fail_if_provider_unavailable: bool,
+    prepare_provider: F,
+) -> Result<ProviderChain>
+where
+    F: FnOnce(i32) -> Result<(bool, ExecutionProviderDispatch)>,
+{
+    let device_id_i32 = device_id_to_i32(provider_name, device_id)?;
+    let (is_available, provider_dispatch) = prepare_provider(device_id_i32)?;
+    let resolution = decide_provider_resolution(
+        requested,
+        preferred,
         is_available,
         fail_if_provider_unavailable,
     )?;
@@ -154,7 +160,7 @@ fn resolve_cann_execution_providers(
         })
     } else {
         Ok(ProviderChain {
-            providers: vec![cann_provider.build(), cpu_provider],
+            providers: vec![provider_dispatch, cpu_provider],
             resolution,
         })
     }

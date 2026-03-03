@@ -1,3 +1,4 @@
+#[cfg(test)]
 use ndarray::{Array3, Array4, s};
 use std::sync::OnceLock;
 
@@ -11,6 +12,7 @@ use crate::{
     },
 };
 
+#[cfg(test)]
 pub fn resize_norm_img(
     img: &RecImage,
     max_wh_ratio: f64,
@@ -19,6 +21,7 @@ pub fn resize_norm_img(
     resize_norm_img_with_backend(img, max_wh_ratio, rec_image_shape, VisionBackend::PureRust)
 }
 
+#[cfg(test)]
 pub fn resize_norm_img_with_backend(
     img: &RecImage,
     max_wh_ratio: f64,
@@ -29,6 +32,7 @@ pub fn resize_norm_img_with_backend(
     resize_norm_img_impl(img, max_wh_ratio, rec_image_shape, backend)
 }
 
+#[cfg(test)]
 pub fn make_batch(
     images: &[RecImage],
     max_wh_ratio: f64,
@@ -42,6 +46,7 @@ pub fn make_batch(
     )
 }
 
+#[cfg(test)]
 pub fn make_batch_with_backend(
     images: &[RecImage],
     max_wh_ratio: f64,
@@ -60,6 +65,7 @@ pub fn make_batch_with_backend(
     Ok(batch)
 }
 
+#[cfg(test)]
 pub fn make_batch_with_backend_by_indices(
     images: &[RecImage],
     indices: &[usize],
@@ -191,6 +197,7 @@ pub(crate) fn write_resize_norm_img_into_slice_with_scratch(
     Ok(())
 }
 
+#[cfg(test)]
 fn resize_norm_img_impl(
     img: &RecImage,
     max_wh_ratio: f64,

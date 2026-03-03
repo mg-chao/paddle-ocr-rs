@@ -29,6 +29,7 @@ thiserror = "2"
 unicode-bidi = "0.3"
 turbojpeg = { version = "1.4.0", default-features = false, features = ["cmake"] }
 rayon = "1.10"
+clap = { version = "4.5", features = ["derive"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 ort = { version = "2.0.0-rc.10", default-features = false, features = ["ndarray", "std", "directml"] }

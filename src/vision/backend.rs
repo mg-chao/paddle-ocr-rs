@@ -6,6 +6,7 @@ use crate::{config::VisionBackend, error::Result};
 pub const OPENCV_BACKEND_DISABLED_MESSAGE: &str =
     "OpenCV backend requested but crate feature `opencv-backend` is not enabled";
 
+#[cfg(test)]
 pub fn default_backend() -> VisionBackend {
     VisionBackend::default()
 }

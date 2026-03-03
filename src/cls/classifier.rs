@@ -52,13 +52,6 @@ impl Default for ClassifierConfig {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ClsOutput {
-    pub images: Vec<RecImage>,
-    pub cls_res: Vec<(String, f32)>,
-    pub elapsed_ms: f32,
-}
-
-#[derive(Debug, Clone, Default)]
 pub struct ClsInPlaceOutput {
     pub cls_res: Vec<(String, f32)>,
     pub elapsed_ms: f32,
@@ -110,20 +103,6 @@ impl Classifier {
             config,
             session,
             batch_scratch: Vec::new(),
-        })
-    }
-
-    pub fn classify(&mut self, images: &[RecImage]) -> Result<ClsOutput> {
-        if images.is_empty() {
-            return Ok(ClsOutput::default());
-        }
-
-        let mut out_images = images.to_vec();
-        let result = self.classify_in_place(&mut out_images)?;
-        Ok(ClsOutput {
-            images: out_images,
-            cls_res: result.cls_res,
-            elapsed_ms: result.elapsed_ms,
         })
     }
 

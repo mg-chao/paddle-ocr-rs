@@ -1,3 +1,4 @@
+#[cfg(test)]
 use ndarray::Array3;
 use std::sync::OnceLock;
 
@@ -11,10 +12,12 @@ use crate::{
     },
 };
 
+#[cfg(test)]
 pub fn resize_norm_img(img: &RecImage, cls_image_shape: [usize; 3]) -> Result<Array3<f32>> {
     resize_norm_img_with_backend(img, cls_image_shape, VisionBackend::PureRust)
 }
 
+#[cfg(test)]
 pub fn resize_norm_img_with_backend(
     img: &RecImage,
     cls_image_shape: [usize; 3],
@@ -100,6 +103,7 @@ pub(crate) fn write_resize_norm_img_into_slice_with_scratch(
     Ok(())
 }
 
+#[cfg(test)]
 fn resize_norm_img_impl(
     img: &RecImage,
     cls_image_shape: [usize; 3],
@@ -115,10 +119,6 @@ fn resize_norm_img_impl(
     Array3::from_shape_vec((img_c, img_h, img_w), out).map_err(|e| {
         PaddleOcrError::InvalidInput(format!("failed to build cls normalized tensor: {e}"))
     })
-}
-
-pub fn rotate_180(img: &RecImage) -> Result<RecImage> {
-    rotate_180_image(img, VisionBackend::PureRust)
 }
 
 pub fn rotate_180_with_backend(img: &RecImage, backend: VisionBackend) -> Result<RecImage> {

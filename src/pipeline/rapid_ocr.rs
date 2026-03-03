@@ -27,6 +27,35 @@ pub struct PipelineProviderResolutions {
     pub rec: ProviderResolution,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RunSwitches {
+    use_det: bool,
+    use_cls: bool,
+    use_rec: bool,
+    need_stage_images: bool,
+    return_word_box: bool,
+    return_single_char_box: bool,
+    text_score: f32,
+}
+
+#[derive(Debug)]
+struct PreparedImage {
+    ori_h: usize,
+    ori_w: usize,
+    ratio_h: f32,
+    ratio_w: f32,
+    preprocess_record: PreprocessRecord,
+    proc_img: crate::config::RecImage,
+}
+
+#[derive(Debug, Default)]
+struct RunBuffers {
+    det_boxes: Vec<crate::Quad>,
+    det_scores: Vec<f32>,
+    stage_images: Vec<crate::config::RecImage>,
+    lines: Vec<LineResult>,
+}
+
 #[derive(Debug)]
 pub struct RapidOcr {
     config: EngineConfig,
@@ -54,19 +83,44 @@ impl RapidOcr {
     pub fn run(&mut self, input: OcrInput, opts: OcrCallOptions) -> Result<OcrOutput> {
         let e2e_start = Instant::now();
         let mut output = OcrOutput::default();
+        let switches = self.resolve_run_switches(&opts);
+        let mut prepared = self.prepare_image(input, switches.use_det)?;
+        let mut buffers = RunBuffers::default();
 
+        if !self.run_detection_stage(&opts, switches, &mut prepared, &mut buffers, &mut output)? {
+            output.e2e_ms = Some(e2e_start.elapsed().as_secs_f32() * 1000.0);
+            return Ok(output);
+        }
+
+        self.run_classification_stage(switches, &mut buffers, &mut output)?;
+        self.run_recognition_stage(switches, &mut buffers, &mut output)?;
+        self.finalize_detection_outputs(switches, &prepared, &mut buffers, &mut output)?;
+        self.finalize_recognition_outputs(switches, &buffers.lines, &mut output);
+
+        output.e2e_ms = Some(e2e_start.elapsed().as_secs_f32() * 1000.0);
+        Ok(output)
+    }
+
+    fn resolve_run_switches(&self, opts: &OcrCallOptions) -> RunSwitches {
         let use_det = opts.use_det.unwrap_or(self.config.global.use_det);
         let use_cls = opts.use_cls.unwrap_or(self.config.global.use_cls);
         let use_rec = opts.use_rec.unwrap_or(self.config.global.use_rec);
-        let need_stage_images = use_cls || use_rec;
-        let return_word_box = opts
-            .return_word_box
-            .unwrap_or(self.config.global.return_word_box);
-        let return_single_char_box = opts
-            .return_single_char_box
-            .unwrap_or(self.config.global.return_single_char_box);
-        let text_score = opts.text_score.unwrap_or(self.config.global.text_score);
+        RunSwitches {
+            use_det,
+            use_cls,
+            use_rec,
+            need_stage_images: use_cls || use_rec,
+            return_word_box: opts
+                .return_word_box
+                .unwrap_or(self.config.global.return_word_box),
+            return_single_char_box: opts
+                .return_single_char_box
+                .unwrap_or(self.config.global.return_single_char_box),
+            text_score: opts.text_score.unwrap_or(self.config.global.text_score),
+        }
+    }
 
+    fn prepare_image(&mut self, input: OcrInput, use_det: bool) -> Result<PreparedImage> {
         let ori_img = self.loader.load(input)?;
         let ori_h = ori_img.height();
         let ori_w = ori_img.width();
@@ -75,136 +129,193 @@ impl RapidOcr {
         } else {
             self.config.rec.runtime.vision_backend
         };
-        let (mut proc_img, ratio_h, ratio_w) = resize_image_within_bounds(
+        let (proc_img, ratio_h, ratio_w) = resize_image_within_bounds(
             ori_img,
             self.config.global.min_side_len,
             self.config.global.max_side_len,
             preprocessing_backend,
         )?;
 
-        let mut preprocess_record = PreprocessRecord {
+        Ok(PreparedImage {
+            ori_h,
+            ori_w,
             ratio_h,
             ratio_w,
-            ..PreprocessRecord::default()
-        };
+            preprocess_record: PreprocessRecord {
+                ratio_h,
+                ratio_w,
+                ..PreprocessRecord::default()
+            },
+            proc_img,
+        })
+    }
 
-        let mut det_boxes = Vec::new();
-        let mut det_scores = Vec::new();
-        let mut stage_images = Vec::new();
-
-        if use_det {
+    fn run_detection_stage(
+        &mut self,
+        opts: &OcrCallOptions,
+        switches: RunSwitches,
+        prepared: &mut PreparedImage,
+        buffers: &mut RunBuffers,
+        output: &mut OcrOutput,
+    ) -> Result<bool> {
+        if switches.use_det {
             let (padded, pad_top) = apply_vertical_padding(
-                proc_img,
+                prepared.proc_img.clone(),
                 self.config.global.width_height_ratio,
                 self.config.global.min_height,
             )?;
-            proc_img = padded;
-            preprocess_record.pad_top = pad_top;
+            prepared.proc_img = padded;
+            prepared.preprocess_record.pad_top = pad_top;
 
             self.detector
                 .update_postprocess(opts.box_thresh, opts.unclip_ratio);
-            let det_out = self.detector.detect(&proc_img)?;
+            let det_out = self.detector.detect(&prepared.proc_img)?;
             if det_out.boxes.is_empty() {
-                output.e2e_ms = Some(e2e_start.elapsed().as_secs_f32() * 1000.0);
-                return Ok(output);
+                return Ok(false);
             }
+
             output.elapsed_ms[0] = Some(det_out.elapsed_ms);
             output.det_breakdown_ms = det_out.breakdown;
-            det_boxes = det_out.boxes;
-            det_scores = det_out.scores;
-            if need_stage_images {
-                stage_images = crop_text_regions(
-                    &proc_img,
-                    &det_boxes,
+            buffers.det_boxes = det_out.boxes;
+            buffers.det_scores = det_out.scores;
+
+            if switches.need_stage_images {
+                buffers.stage_images = crop_text_regions(
+                    &prepared.proc_img,
+                    &buffers.det_boxes,
                     self.config.det.runtime.vision_backend,
                 )?;
             }
-        } else if need_stage_images {
-            stage_images.push(proc_img);
+        } else if switches.need_stage_images {
+            buffers.stage_images.push(prepared.proc_img.clone());
         }
 
-        if use_cls {
-            let cls_result = self.classifier.classify_in_place(&mut stage_images)?;
+        Ok(true)
+    }
+
+    fn run_classification_stage(
+        &mut self,
+        switches: RunSwitches,
+        buffers: &mut RunBuffers,
+        output: &mut OcrOutput,
+    ) -> Result<()> {
+        if switches.use_cls {
+            let cls_result = self
+                .classifier
+                .classify_in_place(&mut buffers.stage_images)?;
             output.cls_res = Some(cls_result.cls_res);
             output.elapsed_ms[1] = Some(cls_result.elapsed_ms);
         }
+        Ok(())
+    }
 
-        let mut lines: Vec<LineResult> = Vec::new();
-        if use_rec {
-            let rec = self.recognizer.recognize(
-                &stage_images,
-                RecognizeOptions {
-                    return_word_box,
-                    return_single_char_box,
-                },
+    fn run_recognition_stage(
+        &mut self,
+        switches: RunSwitches,
+        buffers: &mut RunBuffers,
+        output: &mut OcrOutput,
+    ) -> Result<()> {
+        if !switches.use_rec {
+            return Ok(());
+        }
+
+        let rec = self.recognizer.recognize(
+            &buffers.stage_images,
+            RecognizeOptions {
+                return_word_box: switches.return_word_box,
+                return_single_char_box: switches.return_single_char_box,
+            },
+        )?;
+        output.elapsed_ms[2] = Some(rec.elapsed.as_secs_f32() * 1000.0);
+        buffers.lines = rec.lines;
+        Ok(())
+    }
+
+    fn finalize_detection_outputs(
+        &mut self,
+        switches: RunSwitches,
+        prepared: &PreparedImage,
+        buffers: &mut RunBuffers,
+        output: &mut OcrOutput,
+    ) -> Result<()> {
+        if !switches.use_det {
+            return Ok(());
+        }
+
+        let mut mapped_boxes = std::mem::take(&mut buffers.det_boxes);
+        map_boxes_to_original(
+            &mut mapped_boxes,
+            prepared.preprocess_record,
+            prepared.ori_h,
+            prepared.ori_w,
+        );
+
+        if !switches.use_rec {
+            output.boxes = Some(mapped_boxes);
+            output.det_scores = Some(std::mem::take(&mut buffers.det_scores));
+            return Ok(());
+        }
+
+        let lines = std::mem::take(&mut buffers.lines);
+        let det_scores = std::mem::take(&mut buffers.det_scores);
+        let (filtered_boxes, filtered_scores, filtered_lines, kept_indices) =
+            filter_empty_lines_boxes_and_scores(mapped_boxes, det_scores, lines);
+        buffers.lines = filtered_lines;
+
+        let mut computed_word_boxes = None;
+        if switches.return_word_box && !filtered_boxes.is_empty() && !buffers.lines.is_empty() {
+            let mapped_crops = map_img_to_original(
+                &buffers.stage_images,
+                prepared.ratio_h,
+                prepared.ratio_w,
+                self.config.det.runtime.vision_backend,
             )?;
-            output.elapsed_ms[2] = Some(rec.elapsed.as_secs_f32() * 1000.0);
-            lines = rec.lines;
+            let filtered_crops = select_items_by_indices(mapped_crops, &kept_indices);
+            let word_boxes = crate::rec::word_boxes::compute_word_boxes_with_backend(
+                &filtered_crops,
+                &filtered_boxes,
+                &buffers.lines,
+                switches.return_single_char_box,
+                self.config.rec.runtime.vision_backend,
+            )?;
+            computed_word_boxes = Some(word_boxes);
         }
 
-        if use_det {
-            let mut mapped_boxes = det_boxes;
-            map_boxes_to_original(&mut mapped_boxes, preprocess_record, ori_h, ori_w);
+        let (
+            score_filtered_boxes,
+            score_filtered_scores,
+            score_filtered_lines,
+            score_filtered_words,
+        ) = filter_by_text_score_for_full(
+            filtered_boxes,
+            filtered_scores,
+            std::mem::take(&mut buffers.lines),
+            computed_word_boxes,
+            switches.text_score,
+        );
 
-            if use_rec {
-                let (filtered_boxes, filtered_scores, filtered_lines, kept_indices) =
-                    filter_empty_lines_boxes_and_scores(mapped_boxes, det_scores, lines);
-                lines = filtered_lines;
+        buffers.lines = score_filtered_lines;
+        output.boxes = Some(score_filtered_boxes);
+        output.det_scores = Some(score_filtered_scores);
+        output.word_boxes = score_filtered_words;
+        Ok(())
+    }
 
-                let mut computed_word_boxes = None;
-                if return_word_box && !filtered_boxes.is_empty() && !lines.is_empty() {
-                    let mapped_crops = map_img_to_original(
-                        &stage_images,
-                        ratio_h,
-                        ratio_w,
-                        self.config.det.runtime.vision_backend,
-                    )?;
-                    let filtered_crops = select_items_by_indices(mapped_crops, &kept_indices);
-                    let word_boxes = crate::rec::word_boxes::compute_word_boxes_with_backend(
-                        &filtered_crops,
-                        &filtered_boxes,
-                        &lines,
-                        return_single_char_box,
-                        self.config.rec.runtime.vision_backend,
-                    )?;
-                    computed_word_boxes = Some(word_boxes);
-                }
-
-                let (
-                    score_filtered_boxes,
-                    score_filtered_scores,
-                    score_filtered_lines,
-                    score_filtered_words,
-                ) = filter_by_text_score_for_full(
-                    filtered_boxes,
-                    filtered_scores,
-                    lines,
-                    computed_word_boxes,
-                    text_score,
-                );
-
-                lines = score_filtered_lines;
-                output.boxes = Some(score_filtered_boxes);
-                output.det_scores = Some(score_filtered_scores);
-                output.word_boxes = score_filtered_words;
-            } else {
-                output.boxes = Some(mapped_boxes);
-                output.det_scores = Some(det_scores);
-            }
+    fn finalize_recognition_outputs(
+        &self,
+        switches: RunSwitches,
+        lines: &[LineResult],
+        output: &mut OcrOutput,
+    ) {
+        if !switches.use_rec || lines.is_empty() {
+            return;
         }
 
-        if use_rec {
-            // Keep parity with Python: text_score only filters full outputs (det+rec),
-            // rec-only mode returns raw recognition results.
-            if !lines.is_empty() {
-                output.txts = Some(lines.iter().map(|v| v.text.clone()).collect());
-                output.scores = Some(lines.iter().map(|v| v.score).collect());
-                output.lines = Some(lines);
-            }
-        }
-
-        output.e2e_ms = Some(e2e_start.elapsed().as_secs_f32() * 1000.0);
-        Ok(output)
+        // Keep parity with Python: text_score only filters full outputs (det+rec),
+        // rec-only mode returns raw recognition results.
+        output.txts = Some(lines.iter().map(|v| v.text.clone()).collect());
+        output.scores = Some(lines.iter().map(|v| v.score).collect());
+        output.lines = Some(lines.to_vec());
     }
 
     pub fn provider_resolutions(&self) -> PipelineProviderResolutions {
@@ -272,12 +383,7 @@ fn filter_empty_lines_boxes_and_scores(
     let mut out_scores = Vec::new();
     let mut out_lines = Vec::new();
     let mut kept_indices = Vec::new();
-    for (idx, ((b, s), l)) in boxes
-        .into_iter()
-        .zip(det_scores.into_iter())
-        .zip(lines.into_iter())
-        .enumerate()
-    {
+    for (idx, ((b, s), l)) in boxes.into_iter().zip(det_scores).zip(lines).enumerate() {
         if l.text.trim().is_empty() {
             continue;
         }
@@ -374,14 +480,6 @@ impl RapidOcrEngine {
     pub fn provider_resolutions(&self) -> PipelineProviderResolutions {
         self.inner.provider_resolutions()
     }
-}
-
-#[allow(dead_code)]
-fn _flatten_word_boxes(word_lines: &[Vec<WordBox>]) -> Vec<WordBox> {
-    word_lines
-        .iter()
-        .flat_map(|line| line.iter().cloned())
-        .collect()
 }
 
 #[cfg(test)]

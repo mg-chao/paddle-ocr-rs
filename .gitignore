@@ -3,3 +3,5 @@ Cargo.lock
 test
 models
 test_output
+.bench
+scripts/__pycache__

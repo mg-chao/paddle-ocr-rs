@@ -4,7 +4,9 @@ use std::{
     path::Path,
 };
 
-use ndarray::{Array3, ArrayView2, ArrayView3, Axis, s};
+#[cfg(test)]
+use ndarray::Array3;
+use ndarray::{ArrayView2, ArrayView3, Axis, s};
 
 use crate::{
     error::{PaddleOcrError, Result},
@@ -44,6 +46,7 @@ impl CtcLabelDecoder {
         })
     }
 
+    #[cfg(test)]
     pub fn decode(
         &self,
         preds: &Array3<f32>,

@@ -1,4 +1,3 @@
-use ndarray::Array4;
 use rayon::prelude::*;
 
 use crate::{
@@ -39,24 +38,6 @@ pub(crate) struct DetPreprocessScratch {
 }
 
 impl DetPreProcess {
-    pub fn run(&self, img: &RecImage) -> Result<(Array4<f32>, usize, usize)> {
-        let mut out = Vec::new();
-        let (resized_h, resized_w) = self.run_into_buffer(img, &mut out)?;
-        let out = Array4::from_shape_vec((1, 3, resized_h, resized_w), out).map_err(|e| {
-            PaddleOcrError::InvalidInput(format!("failed to build det tensor: {e}"))
-        })?;
-        Ok((out, resized_h, resized_w))
-    }
-
-    pub(crate) fn run_into_buffer(
-        &self,
-        img: &RecImage,
-        buffer: &mut Vec<f32>,
-    ) -> Result<(usize, usize)> {
-        let mut scratch = DetPreprocessScratch::default();
-        self.run_into_buffer_with_scratch(img, buffer, &mut scratch, None)
-    }
-
     pub(crate) fn run_into_buffer_with_scratch(
         &self,
         img: &RecImage,
@@ -101,12 +82,6 @@ impl DetPreProcess {
         }
 
         Ok((resize_h, resize_w))
-    }
-
-    pub fn resize(&self, img: &RecImage) -> Result<RecImage> {
-        let (resize_h, resize_w) = self.compute_resize_hw(img, self.limit_side_len)?;
-        let backend = resolve_backend_strict(self.vision_backend)?;
-        resize_image(img, resize_w, resize_h, backend)
     }
 
     fn compute_resize_hw(&self, img: &RecImage, limit_side_len: usize) -> Result<(usize, usize)> {

@@ -4,6 +4,7 @@ use std::{
     time::Instant,
 };
 
+use clap::Parser;
 use paddle_ocr_rs::{EngineConfig, OcrInput, OcrResult, RapidOcrEngine, RunOptions, StageTimings};
 use serde_json::json;
 
@@ -15,7 +16,7 @@ fn main() {
 }
 
 fn run_main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = parse_cli()?;
+    let cli = Cli::parse();
     let images = collect_images(&cli.images_dir)?;
     if images.is_empty() {
         return Err(format!("no images found under {}", cli.images_dir.display()).into());
@@ -111,71 +112,22 @@ fn run_main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Parser)]
+#[command(
+    name = "bench_warm_e2e",
+    about = "Warm benchmark for end-to-end OCR runs"
+)]
 struct Cli {
+    #[arg(long = "config")]
     config_path: Option<PathBuf>,
+    #[arg(long, default_value = "test/test_files")]
     images_dir: PathBuf,
+    #[arg(long, default_value_t = 1, value_parser = parse_rounds)]
     rounds: usize,
+    #[arg(long = "output")]
     output_path: Option<PathBuf>,
+    #[arg(long)]
     profile_det_breakdown: bool,
-}
-
-fn parse_cli() -> Result<Cli, Box<dyn std::error::Error>> {
-    let mut config_path = None;
-    let mut images_dir = PathBuf::from("test/test_files");
-    let mut rounds = 1usize;
-    let mut output_path = None;
-    let mut profile_det_breakdown = false;
-
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--config" => {
-                config_path = Some(PathBuf::from(
-                    args.next().ok_or("missing value for --config")?,
-                ));
-            }
-            "--images-dir" => {
-                images_dir = PathBuf::from(args.next().ok_or("missing value for --images-dir")?);
-            }
-            "--rounds" => {
-                rounds = args
-                    .next()
-                    .ok_or("missing value for --rounds")?
-                    .parse::<usize>()?;
-                if rounds == 0 {
-                    return Err("rounds must be greater than zero".into());
-                }
-            }
-            "--output" => {
-                output_path = Some(PathBuf::from(
-                    args.next().ok_or("missing value for --output")?,
-                ));
-            }
-            "--profile-det-breakdown" => {
-                profile_det_breakdown = true;
-            }
-            "-h" | "--help" => {
-                print_usage();
-                std::process::exit(0);
-            }
-            _ => return Err(format!("unknown arg `{arg}`").into()),
-        }
-    }
-
-    Ok(Cli {
-        config_path,
-        images_dir,
-        rounds,
-        output_path,
-        profile_det_breakdown,
-    })
-}
-
-fn print_usage() {
-    println!(
-        "usage: bench_warm_e2e [--config <yaml>] [--images-dir <dir>] [--rounds <n>] [--output <json>] [--profile-det-breakdown]"
-    );
 }
 
 fn collect_images(dir: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
@@ -248,4 +200,14 @@ fn stats(values: &[f64]) -> serde_json::Value {
 fn percentile(sorted: &[f64], p: f64) -> f64 {
     let idx = ((sorted.len() - 1) as f64 * p).round() as usize;
     sorted[idx]
+}
+
+fn parse_rounds(value: &str) -> Result<usize, String> {
+    let rounds = value
+        .parse::<usize>()
+        .map_err(|_| format!("invalid --rounds value `{value}`"))?;
+    if rounds == 0 {
+        return Err("rounds must be greater than zero".to_string());
+    }
+    Ok(rounds)
 }

@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    postprocess_db::DbPostProcess,
+    postprocess::DbPostProcess,
     preprocess::{DetPreProcess, DetPreprocessScratch},
 };
 
@@ -114,16 +114,6 @@ impl Detector {
         };
 
         let det_vision_backend = resolve_backend_strict(config.runtime.vision_backend)?;
-        #[cfg(feature = "opencv-backend")]
-        let det_vision_backend = {
-            let mut backend = det_vision_backend;
-            if matches!(backend, crate::config::VisionBackend::PureRust) {
-                // Keep detector parity with RapidOCR Python when OpenCV is linked.
-                // Pure-Rust remains the fallback path for builds without OpenCV.
-                backend = crate::config::VisionBackend::OpenCv;
-            }
-            backend
-        };
 
         let pre = DetPreProcess {
             limit_side_len: config.limit_side_len,

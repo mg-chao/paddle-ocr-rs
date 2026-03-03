@@ -154,56 +154,14 @@ fn resize_rows_into(
     let hrow0 = &mut scratch.hrow0[..row_stride];
     let hrow1 = &mut scratch.hrow1[..row_stride];
 
-    let mut hrow0_sy = usize::MAX;
-    let mut hrow1_sy = usize::MAX;
-
     for row in 0..row_count {
         let dy = start_dy + row;
         let sy0 = clip_i32(kernel.yofs[dy], 0, dims.src_h as i32) as usize;
         let sy1 = clip_i32(kernel.yofs[dy] + 1, 0, dims.src_h as i32) as usize;
-
-        if hrow0_sy != sy0 && hrow1_sy != sy0 {
-            if hrow0_sy == sy1 {
-                let src_row = &src[sy0 * dims.src_w * 3..(sy0 + 1) * dims.src_w * 3];
-                hresize_row_bgr_u8(src_row, dims.src_w, kernel.xofs, kernel.ialpha, hrow1);
-                hrow1_sy = sy0;
-            } else {
-                let src_row = &src[sy0 * dims.src_w * 3..(sy0 + 1) * dims.src_w * 3];
-                hresize_row_bgr_u8(src_row, dims.src_w, kernel.xofs, kernel.ialpha, hrow0);
-                hrow0_sy = sy0;
-            }
-        }
-        if hrow0_sy != sy1 && hrow1_sy != sy1 {
-            if hrow0_sy == sy0 {
-                let src_row = &src[sy1 * dims.src_w * 3..(sy1 + 1) * dims.src_w * 3];
-                hresize_row_bgr_u8(src_row, dims.src_w, kernel.xofs, kernel.ialpha, hrow1);
-                hrow1_sy = sy1;
-            } else {
-                let src_row = &src[sy1 * dims.src_w * 3..(sy1 + 1) * dims.src_w * 3];
-                hresize_row_bgr_u8(src_row, dims.src_w, kernel.xofs, kernel.ialpha, hrow0);
-                hrow0_sy = sy1;
-            }
-        }
-
-        let (row0, row1): (&[i32], &[i32]) = if hrow0_sy == sy0 {
-            (
-                &hrow0[..],
-                if hrow0_sy == sy1 {
-                    &hrow0[..]
-                } else {
-                    &hrow1[..]
-                },
-            )
-        } else {
-            (
-                &hrow1[..],
-                if hrow1_sy == sy1 {
-                    &hrow1[..]
-                } else {
-                    &hrow0[..]
-                },
-            )
-        };
+        let src_row0 = &src[sy0 * dims.src_w * 3..(sy0 + 1) * dims.src_w * 3];
+        let src_row1 = &src[sy1 * dims.src_w * 3..(sy1 + 1) * dims.src_w * 3];
+        hresize_row_bgr_u8(src_row0, dims.src_w, kernel.xofs, kernel.ialpha, hrow0);
+        hresize_row_bgr_u8(src_row1, dims.src_w, kernel.xofs, kernel.ialpha, hrow1);
 
         let b0 = kernel.ibeta[dy * 2] as i32;
         let b1 = kernel.ibeta[dy * 2 + 1] as i32;
@@ -213,8 +171,8 @@ fn resize_rows_into(
         // - `row0`, `row1`, and `dst_row` all have identical length.
         // - loop bounds guarantee in-range pointer access.
         unsafe {
-            let row0_ptr = row0.as_ptr();
-            let row1_ptr = row1.as_ptr();
+            let row0_ptr = hrow0.as_ptr();
+            let row1_ptr = hrow1.as_ptr();
             let dst_ptr = dst_row.as_mut_ptr();
             for x in 0..row_stride {
                 let v = (((b0 * (*row0_ptr.add(x) >> 4)) >> 16)
@@ -267,8 +225,12 @@ pub(crate) fn resize_bgr_inter_linear_into_with_scratch(
         return Ok(());
     }
 
-    let scale_x = src_w as f64 / dst_w as f64;
-    let scale_y = src_h as f64 / dst_h as f64;
+    // Match OpenCV's internal order:
+    // inv_scale = dst/src, then scale = 1.0 / inv_scale.
+    let inv_scale_x = dst_w as f64 / src_w as f64;
+    let inv_scale_y = dst_h as f64 / src_h as f64;
+    let scale_x = 1.0 / inv_scale_x;
+    let scale_y = 1.0 / inv_scale_y;
 
     scratch.xofs.resize(dst_w, 0);
     scratch.ialpha.resize(dst_w * 2, 0);
@@ -300,17 +262,8 @@ pub(crate) fn resize_bgr_inter_linear_into_with_scratch(
     let ibeta = &mut scratch.ibeta;
     for dy in 0..dst_h {
         let mut fy = ((dy as f64 + 0.5) * scale_y - 0.5) as f32;
-        let mut sy = fy.floor() as i32;
+        let sy = fy.floor() as i32;
         fy -= sy as f32;
-
-        if sy < 0 {
-            fy = 0.0;
-            sy = 0;
-        }
-        if sy >= src_h as i32 - 1 {
-            fy = 0.0;
-            sy = src_h as i32 - 1;
-        }
 
         yofs[dy] = sy;
         ibeta[dy * 2] = saturate_cast_i16_from_f32((1.0 - fy) * INTER_RESIZE_COEF_SCALE as f32);

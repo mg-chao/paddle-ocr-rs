@@ -47,6 +47,7 @@ struct ModelCandidate<'a> {
 
 #[derive(Debug, Clone)]
 pub struct ResolvedRecModel {
+    #[allow(dead_code)]
     pub model_name: String,
     pub model_url: String,
     pub sha256: Option<String>,
@@ -55,6 +56,7 @@ pub struct ResolvedRecModel {
 
 #[derive(Debug, Clone)]
 pub struct ResolvedTaskModel {
+    #[allow(dead_code)]
     pub model_name: String,
     pub model_url: String,
     pub sha256: Option<String>,

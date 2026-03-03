@@ -3,13 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use paddle_ocr_rs::{
-    EngineConfig, LangRec, OcrInput, OcrResult, ProviderPreference, RapidOcrEngine, RunOptions,
-    input::image_loader::LoadImage,
+    EngineConfig, LangRec, LoadImage, OcrInput, OcrResult, ProviderPreference, RapidOcrEngine,
+    RunOptions,
 };
 
 const CHECK_IMG_URL: &str = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.1.0/resources/test_files/ch_en_num.jpg";
-const CHECK_EXPECTED: &str = "正品促销";
+const CHECK_EXPECTED: &str = "姝ｅ搧淇冮攢";
 
 fn main() {
     if let Err(err) = run_main() {
@@ -19,63 +20,125 @@ fn main() {
 }
 
 fn run_main() -> Result<(), Box<dyn std::error::Error>> {
-    let raw_args: Vec<String> = env::args().skip(1).collect();
-    if raw_args.is_empty() {
-        return Err(usage().into());
-    }
-    if matches!(raw_args[0].as_str(), "-h" | "--help") {
-        println!("{}", usage());
-        return Ok(());
-    }
-
-    match raw_args[0].as_str() {
-        "run" => run_cmd(&raw_args[1..]),
-        "config" => config_cmd(&raw_args[1..]),
-        "check" => check_cmd(&raw_args[1..]),
-        _ => run_cmd(&raw_args),
+    let cli = Cli::parse_from(normalize_legacy_args(env::args_os()));
+    match cli.command {
+        Commands::Run(args) => run_cmd(args),
+        Commands::Config(args) => config_cmd(args),
+        Commands::Check => check_cmd(),
     }
 }
 
-#[derive(Debug, Clone)]
-struct RunCli {
-    img_path: String,
+#[derive(Debug, Parser)]
+#[command(
+    name = "rapidocr",
+    about = "Run PaddleOCR ONNX models",
+    disable_help_subcommand = true
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    Run(RunArgs),
+    Config(ConfigArgs),
+    Check,
+}
+
+#[derive(Debug, Args, Clone)]
+struct RunArgs {
+    #[arg(long = "img-path", alias = "img")]
+    img_path: Option<String>,
+    #[arg(value_name = "IMG_PATH", conflicts_with = "img_path")]
+    img_path_positional: Option<String>,
+    #[arg(long = "config")]
     config_path: Option<PathBuf>,
+    #[arg(long, value_enum)]
     provider: Option<ProviderCli>,
+    #[arg(long, requires = "provider")]
     device_id: Option<usize>,
-    fail_if_provider_unavailable: Option<bool>,
+    #[arg(long, conflicts_with = "allow_provider_fallback")]
+    fail_if_provider_unavailable: bool,
+    #[arg(long, conflicts_with = "fail_if_provider_unavailable")]
+    allow_provider_fallback: bool,
+    #[arg(long, value_parser = parse_f32_unit_interval)]
     text_score: Option<f32>,
+    #[arg(long = "lang-type", alias = "lang", value_parser = parse_lang)]
     lang_type: Option<LangRec>,
+    #[arg(long, value_parser = parse_bool)]
     use_det: Option<bool>,
+    #[arg(long, value_parser = parse_bool)]
     use_cls: Option<bool>,
+    #[arg(long, value_parser = parse_bool)]
     use_rec: Option<bool>,
-    return_word_box: Option<bool>,
-    return_single_char_box: Option<bool>,
+    #[arg(long, alias = "word", conflicts_with = "no_return_word_box")]
+    return_word_box: bool,
+    #[arg(long, conflicts_with = "return_word_box")]
+    no_return_word_box: bool,
+    #[arg(long, conflicts_with = "no_return_single_char_box")]
+    return_single_char_box: bool,
+    #[arg(long, conflicts_with = "return_single_char_box")]
+    no_return_single_char_box: bool,
+    #[arg(long, value_parser = parse_f32_unit_interval)]
     box_thresh: Option<f32>,
+    #[arg(long, value_parser = parse_positive_f32)]
     unclip_ratio: Option<f32>,
+    #[arg(long, alias = "vis")]
     vis: bool,
+    #[arg(long)]
     vis_word: bool,
+    #[arg(long, default_value = ".")]
     vis_save_dir: PathBuf,
-    output_format: OutputFormat,
+    #[arg(long, value_enum)]
+    output_format: Option<OutputFormat>,
+    #[arg(long, conflicts_with = "markdown")]
+    json: bool,
+    #[arg(long, conflicts_with = "json")]
+    markdown: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Args)]
+struct ConfigArgs {
+    #[command(subcommand)]
+    command: ConfigCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    Init(ConfigInitArgs),
+}
+
+#[derive(Debug, Args)]
+struct ConfigInitArgs {
+    #[arg(long, default_value = "./default_rapidocr.yaml")]
+    output: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ProviderCli {
     Cpu,
     Cuda,
-    DirectMl,
+    Directml,
     Cann,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum OutputFormat {
-    #[default]
     Summary,
     Json,
     Markdown,
 }
 
-fn run_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let cli = parse_run_cli(args)?;
+fn run_cmd(cli: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let img_path = cli
+        .img_path
+        .or(cli.img_path_positional)
+        .ok_or("missing --img-path")?;
+
+    if cli.device_id.is_some() && cli.provider.is_none() {
+        return Err("--device-id requires --provider".into());
+    }
 
     let mut cfg = if let Some(path) = &cli.config_path {
         EngineConfig::from_yaml_file(path)?
@@ -92,7 +155,7 @@ fn run_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             ProviderCli::Cuda => ProviderPreference::Cuda {
                 device_id: cli.device_id.unwrap_or(0),
             },
-            ProviderCli::DirectMl => ProviderPreference::DirectMl {
+            ProviderCli::Directml => ProviderPreference::DirectMl {
                 device_id: cli.device_id.unwrap_or(0),
             },
             ProviderCli::Cann => ProviderPreference::Cann {
@@ -107,7 +170,15 @@ fn run_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             runtime.provider_preference = preference;
         }
     }
-    if let Some(strict_provider) = cli.fail_if_provider_unavailable {
+
+    let provider_strictness = if cli.fail_if_provider_unavailable {
+        Some(true)
+    } else if cli.allow_provider_fallback {
+        Some(false)
+    } else {
+        None
+    };
+    if let Some(strict_provider) = provider_strictness {
         for runtime in [
             &mut cfg.det.runtime,
             &mut cfg.cls.runtime,
@@ -118,20 +189,25 @@ fn run_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut engine = RapidOcrEngine::new(cfg)?;
-    let input = parse_input(&cli.img_path);
+    let input = parse_input(&img_path);
     let run_opts = RunOptions {
         use_det: cli.use_det,
         use_cls: cli.use_cls,
         use_rec: cli.use_rec,
-        return_word_box: cli.return_word_box,
-        return_single_char_box: cli.return_single_char_box,
+        return_word_box: resolve_flag_pair(cli.return_word_box, cli.no_return_word_box),
+        return_single_char_box: resolve_flag_pair(
+            cli.return_single_char_box,
+            cli.no_return_single_char_box,
+        ),
         text_score: cli.text_score,
         box_thresh: cli.box_thresh,
         unclip_ratio: cli.unclip_ratio,
     };
 
+    let use_word_boxes = cli.vis_word || run_opts.return_word_box.unwrap_or(false);
     let out = engine.run(input.clone(), run_opts)?;
-    match cli.output_format {
+    let output_format = resolve_output_format(cli.output_format, cli.json, cli.markdown)?;
+    match output_format {
         OutputFormat::Summary => print_result_summary(&out),
         OutputFormat::Json => {
             let doc = out.to_json()?;
@@ -142,15 +218,14 @@ fn run_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if cli.vis {
+    let vis_enabled = cli.vis || cli.vis_word;
+    if vis_enabled {
         let loader = LoadImage;
         let image = loader.load(input)?;
-        if let Some(vis_img) =
-            out.visualize(&image, cli.vis_word || cli.return_word_box.unwrap_or(false))
-        {
+        if let Some(vis_img) = out.visualize(&image, use_word_boxes) {
             fs::create_dir_all(&cli.vis_save_dir)?;
-            let stem = infer_stem(&cli.img_path);
-            let suffix = if cli.vis_word || cli.return_word_box.unwrap_or(false) {
+            let stem = infer_stem(&img_path);
+            let suffix = if use_word_boxes {
                 "_vis_single.png"
             } else {
                 "_vis.png"
@@ -166,42 +241,18 @@ fn run_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn config_cmd(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.is_empty() {
-        return Err("usage: rapidocr config init [--output <path>]".into());
-    }
-    if args[0] != "init" {
-        return Err("usage: rapidocr config init [--output <path>]".into());
-    }
-
-    let mut output = PathBuf::from("./default_rapidocr.yaml");
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--output" => {
-                i += 1;
-                output = PathBuf::from(
-                    args.get(i)
-                        .ok_or("missing value after --output")?
-                        .to_string(),
-                );
-            }
-            "-h" | "--help" => {
-                println!("usage: rapidocr config init [--output <path>]");
-                return Ok(());
-            }
-            other => return Err(format!("unknown arg `{other}`").into()),
+fn config_cmd(args: ConfigArgs) -> Result<(), Box<dyn std::error::Error>> {
+    match args.command {
+        ConfigCommand::Init(init) => {
+            let content = serde_yaml::to_string(&EngineConfig::default())?;
+            fs::write(&init.output, content)?;
+            println!("The config file has saved in {}", init.output.display());
+            Ok(())
         }
-        i += 1;
     }
-
-    let content = serde_yaml::to_string(&EngineConfig::default())?;
-    fs::write(&output, content)?;
-    println!("The config file has saved in {}", output.display());
-    Ok(())
 }
 
-fn check_cmd(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+fn check_cmd() -> Result<(), Box<dyn std::error::Error>> {
     let mut engine = RapidOcrEngine::new(EngineConfig::default())?;
     let out = engine.run(parse_input(CHECK_IMG_URL), RunOptions::default())?;
     let text = first_text(&out).ok_or("check failed: empty OCR output")?;
@@ -215,191 +266,21 @@ fn check_cmd(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn parse_run_cli(args: &[String]) -> Result<RunCli, Box<dyn std::error::Error>> {
-    let mut img_path: Option<String> = None;
-    let mut config_path: Option<PathBuf> = None;
-    let mut provider: Option<ProviderCli> = None;
-    let mut device_id: Option<usize> = None;
-    let mut fail_if_provider_unavailable = None;
-    let mut text_score = None;
-    let mut lang_type = None;
-    let mut use_det = None;
-    let mut use_cls = None;
-    let mut use_rec = None;
-    let mut return_word_box = None;
-    let mut return_single_char_box = None;
-    let mut box_thresh = None;
-    let mut unclip_ratio = None;
-    let mut vis = false;
-    let mut vis_word = false;
-    let mut vis_save_dir = PathBuf::from(".");
-    let mut output_format = OutputFormat::Summary;
-
-    let mut i = 0usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--img-path" | "-img" | "--img" => {
-                i += 1;
-                img_path = Some(
-                    args.get(i)
-                        .ok_or("missing value after --img-path")?
-                        .to_string(),
-                );
+fn normalize_legacy_args<I, S>(args: I) -> Vec<std::ffi::OsString>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<std::ffi::OsString>,
+{
+    args.into_iter()
+        .map(Into::into)
+        .map(|arg| {
+            if arg == "-img" {
+                "--img-path".into()
+            } else {
+                arg
             }
-            "--config" => {
-                i += 1;
-                config_path = Some(PathBuf::from(
-                    args.get(i)
-                        .ok_or("missing value after --config")?
-                        .to_string(),
-                ));
-            }
-            "--provider" => {
-                i += 1;
-                provider = Some(parse_provider(
-                    args.get(i).ok_or("missing value after --provider")?,
-                )?);
-            }
-            "--device-id" => {
-                i += 1;
-                device_id = Some(parse_usize(
-                    args.get(i).ok_or("missing value after --device-id")?,
-                )?);
-            }
-            "--fail-if-provider-unavailable" => {
-                fail_if_provider_unavailable = Some(true);
-            }
-            "--allow-provider-fallback" => {
-                fail_if_provider_unavailable = Some(false);
-            }
-            "--text-score" => {
-                i += 1;
-                text_score = Some(parse_bounded_f32(
-                    args.get(i).ok_or("missing value after --text-score")?,
-                    0.0,
-                    1.0,
-                    "--text-score",
-                )?);
-            }
-            "--lang-type" | "--lang" => {
-                i += 1;
-                lang_type = Some(parse_lang(
-                    args.get(i).ok_or("missing value after --lang-type")?,
-                )?);
-            }
-            "--use-det" => {
-                i += 1;
-                use_det = Some(parse_bool(
-                    args.get(i).ok_or("missing value after --use-det")?,
-                )?);
-            }
-            "--use-cls" => {
-                i += 1;
-                use_cls = Some(parse_bool(
-                    args.get(i).ok_or("missing value after --use-cls")?,
-                )?);
-            }
-            "--use-rec" => {
-                i += 1;
-                use_rec = Some(parse_bool(
-                    args.get(i).ok_or("missing value after --use-rec")?,
-                )?);
-            }
-            "--return-word-box" | "--word" => {
-                return_word_box = Some(true);
-            }
-            "--return-single-char-box" => {
-                return_single_char_box = Some(true);
-            }
-            "--no-return-word-box" => {
-                return_word_box = Some(false);
-            }
-            "--no-return-single-char-box" => {
-                return_single_char_box = Some(false);
-            }
-            "--box-thresh" => {
-                i += 1;
-                box_thresh = Some(parse_bounded_f32(
-                    args.get(i).ok_or("missing value after --box-thresh")?,
-                    0.0,
-                    1.0,
-                    "--box-thresh",
-                )?);
-            }
-            "--unclip-ratio" => {
-                i += 1;
-                unclip_ratio = Some(parse_positive_f32(
-                    args.get(i).ok_or("missing value after --unclip-ratio")?,
-                    "--unclip-ratio",
-                )?);
-            }
-            "--vis" | "-vis" => {
-                vis = true;
-            }
-            "--vis-word" => {
-                vis = true;
-                vis_word = true;
-            }
-            "--vis-save-dir" => {
-                i += 1;
-                vis_save_dir = PathBuf::from(
-                    args.get(i)
-                        .ok_or("missing value after --vis-save-dir")?
-                        .to_string(),
-                );
-            }
-            "--json" => {
-                output_format = choose_output_format(output_format, OutputFormat::Json)?;
-            }
-            "--markdown" => {
-                output_format = choose_output_format(output_format, OutputFormat::Markdown)?;
-            }
-            "--output-format" => {
-                i += 1;
-                output_format = choose_output_format(
-                    output_format,
-                    parse_output_format(args.get(i).ok_or("missing value after --output-format")?)?,
-                )?;
-            }
-            "-h" | "--help" => {
-                println!("{}", run_usage());
-                std::process::exit(0);
-            }
-            other => {
-                if img_path.is_none() && !other.starts_with('-') {
-                    img_path = Some(other.to_string());
-                } else {
-                    return Err(format!("unknown arg `{other}`").into());
-                }
-            }
-        }
-        i += 1;
-    }
-
-    if device_id.is_some() && provider.is_none() {
-        return Err("--device-id requires --provider".into());
-    }
-
-    Ok(RunCli {
-        img_path: img_path.ok_or("missing --img-path")?,
-        config_path,
-        provider,
-        device_id,
-        fail_if_provider_unavailable,
-        text_score,
-        lang_type,
-        use_det,
-        use_cls,
-        use_rec,
-        return_word_box,
-        return_single_char_box,
-        box_thresh,
-        unclip_ratio,
-        vis,
-        vis_word,
-        vis_save_dir,
-        output_format,
-    })
+        })
+        .collect()
 }
 
 fn parse_input(value: &str) -> OcrInput {
@@ -410,79 +291,35 @@ fn parse_input(value: &str) -> OcrInput {
     }
 }
 
-fn parse_bool(value: &str) -> Result<bool, Box<dyn std::error::Error>> {
+fn parse_bool(value: &str) -> Result<bool, String> {
     match value.to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" => Ok(true),
         "0" | "false" | "no" => Ok(false),
-        _ => Err(format!("invalid bool: `{value}`").into()),
+        _ => Err(format!("invalid bool: `{value}`")),
     }
 }
 
-fn parse_bounded_f32(
-    value: &str,
-    min: f32,
-    max: f32,
-    arg_name: &str,
-) -> Result<f32, Box<dyn std::error::Error>> {
-    let parsed = value.parse::<f32>()?;
-    if !(min..=max).contains(&parsed) {
-        return Err(format!("{arg_name} must be in range [{min}, {max}], got {parsed}").into());
+fn parse_f32_unit_interval(value: &str) -> Result<f32, String> {
+    let parsed = value
+        .parse::<f32>()
+        .map_err(|_| format!("invalid float value `{value}`"))?;
+    if !(0.0..=1.0).contains(&parsed) {
+        return Err(format!("value must be in range [0, 1], got {parsed}"));
     }
     Ok(parsed)
 }
 
-fn parse_positive_f32(value: &str, arg_name: &str) -> Result<f32, Box<dyn std::error::Error>> {
-    let parsed = value.parse::<f32>()?;
+fn parse_positive_f32(value: &str) -> Result<f32, String> {
+    let parsed = value
+        .parse::<f32>()
+        .map_err(|_| format!("invalid float value `{value}`"))?;
     if parsed <= 0.0 {
-        return Err(format!("{arg_name} must be > 0, got {parsed}").into());
+        return Err(format!("value must be > 0, got {parsed}"));
     }
     Ok(parsed)
 }
 
-fn parse_usize(value: &str) -> Result<usize, Box<dyn std::error::Error>> {
-    Ok(value.parse::<usize>()?)
-}
-
-fn parse_provider(value: &str) -> Result<ProviderCli, Box<dyn std::error::Error>> {
-    Ok(match value.to_ascii_lowercase().as_str() {
-        "cpu" => ProviderCli::Cpu,
-        "cuda" => ProviderCli::Cuda,
-        "directml" | "direct_ml" | "dml" => ProviderCli::DirectMl,
-        "cann" => ProviderCli::Cann,
-        _ => {
-            return Err(format!(
-                "unsupported --provider value `{value}` (expected one of: cpu|cuda|directml|cann)"
-            )
-            .into());
-        }
-    })
-}
-
-fn parse_output_format(value: &str) -> Result<OutputFormat, Box<dyn std::error::Error>> {
-    Ok(match value.to_ascii_lowercase().as_str() {
-        "summary" => OutputFormat::Summary,
-        "json" => OutputFormat::Json,
-        "markdown" | "md" => OutputFormat::Markdown,
-        _ => {
-            return Err(format!(
-                "unsupported --output-format value `{value}` (expected: summary|json|markdown)"
-            )
-            .into());
-        }
-    })
-}
-
-fn choose_output_format(
-    current: OutputFormat,
-    next: OutputFormat,
-) -> Result<OutputFormat, Box<dyn std::error::Error>> {
-    if current == OutputFormat::Summary || current == next {
-        return Ok(next);
-    }
-    Err("output format flags conflict; choose exactly one of summary/json/markdown".into())
-}
-
-fn parse_lang(value: &str) -> Result<LangRec, Box<dyn std::error::Error>> {
+fn parse_lang(value: &str) -> Result<LangRec, String> {
     Ok(match value.to_ascii_lowercase().as_str() {
         "ch" => LangRec::Ch,
         "ch_doc" => LangRec::ChDoc,
@@ -500,8 +337,43 @@ fn parse_lang(value: &str) -> Result<LangRec, Box<dyn std::error::Error>> {
         "eslav" => LangRec::Eslav,
         "th" => LangRec::Th,
         "el" => LangRec::El,
-        _ => return Err(format!("unsupported --lang-type value `{value}`").into()),
+        _ => return Err(format!("unsupported --lang-type value `{value}`")),
     })
+}
+
+fn resolve_flag_pair(enable: bool, disable: bool) -> Option<bool> {
+    if enable {
+        Some(true)
+    } else if disable {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn resolve_output_format(
+    explicit: Option<OutputFormat>,
+    json: bool,
+    markdown: bool,
+) -> Result<OutputFormat, Box<dyn std::error::Error>> {
+    let mut format = explicit.unwrap_or(OutputFormat::Summary);
+    if json {
+        if format != OutputFormat::Summary && format != OutputFormat::Json {
+            return Err(
+                "output format flags conflict; choose exactly one of summary/json/markdown".into(),
+            );
+        }
+        format = OutputFormat::Json;
+    }
+    if markdown {
+        if format != OutputFormat::Summary && format != OutputFormat::Markdown {
+            return Err(
+                "output format flags conflict; choose exactly one of summary/json/markdown".into(),
+            );
+        }
+        format = OutputFormat::Markdown;
+    }
+    Ok(format)
 }
 
 fn first_text(out: &OcrResult) -> Option<&str> {
@@ -588,75 +460,87 @@ fn infer_stem(img_path: &str) -> String {
     }
 }
 
-fn usage() -> String {
-    format!(
-        "rapidocr commands:\n  run   {}\n  config init [--output <path>]\n  check",
-        run_usage()
-    )
-}
-
-fn run_usage() -> String {
-    "run --img-path <path_or_url> [--config <yaml>] [--provider <cpu|cuda|directml|cann>] [--device-id <usize>] [--fail-if-provider-unavailable|--allow-provider-fallback] [--text-score <f32>] [--lang-type <lang>] [--use-det <bool>] [--use-cls <bool>] [--use-rec <bool>] [--return-word-box|--no-return-word-box] [--return-single-char-box|--no-return-single-char-box] [--box-thresh <f32>] [--unclip-ratio <f32>] [--vis] [--vis-word] [--vis-save-dir <dir>] [--output-format <summary|json|markdown>] [--json] [--markdown]".to_string()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ProviderCli, parse_run_cli};
+    use super::{Cli, Commands, ProviderCli, normalize_legacy_args};
+    use clap::Parser;
 
-    fn args(input: &[&str]) -> Vec<String> {
-        input.iter().map(|v| (*v).to_string()).collect()
+    fn parse_cli(input: &[&str]) -> Result<Cli, clap::Error> {
+        let mut args = vec!["rapidocr".to_string()];
+        args.extend(input.iter().map(|v| (*v).to_string()));
+        Cli::try_parse_from(normalize_legacy_args(args))
     }
 
     #[test]
     fn parse_run_cli_provider_and_device_id() {
-        let cli = parse_run_cli(&args(&[
+        let cli = parse_cli(&[
+            "run",
             "--img-path",
             "test.png",
             "--provider",
             "directml",
             "--device-id",
             "2",
-        ]))
+        ])
         .expect("cli parse should pass");
-        assert_eq!(cli.provider, Some(ProviderCli::DirectMl));
-        assert_eq!(cli.device_id, Some(2));
+        let Commands::Run(run) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(run.provider, Some(ProviderCli::Directml));
+        assert_eq!(run.device_id, Some(2));
     }
 
     #[test]
     fn parse_run_cli_rejects_device_id_without_provider() {
-        let err = parse_run_cli(&args(&["--img-path", "test.png", "--device-id", "1"]))
+        let err = parse_cli(&["run", "--img-path", "test.png", "--device-id", "1"])
             .expect_err("must reject dangling --device-id");
-        assert!(err.to_string().contains("--device-id requires --provider"));
+        assert!(err.to_string().contains("--device-id"));
     }
 
     #[test]
     fn parse_run_cli_provider_strictness_toggle() {
-        let strict = parse_run_cli(&args(&[
+        let strict = parse_cli(&[
+            "run",
             "--img-path",
             "test.png",
             "--fail-if-provider-unavailable",
-        ]))
+        ])
         .expect("cli parse should pass");
-        assert_eq!(strict.fail_if_provider_unavailable, Some(true));
+        let Commands::Run(run) = strict.command else {
+            panic!("expected run command");
+        };
+        assert!(run.fail_if_provider_unavailable);
 
-        let fallback = parse_run_cli(&args(&[
-            "--img-path",
-            "test.png",
-            "--allow-provider-fallback",
-        ]))
-        .expect("cli parse should pass");
-        assert_eq!(fallback.fail_if_provider_unavailable, Some(false));
+        let fallback = parse_cli(&["run", "--img-path", "test.png", "--allow-provider-fallback"])
+            .expect("cli parse should pass");
+        let Commands::Run(run) = fallback.command else {
+            panic!("expected run command");
+        };
+        assert!(run.allow_provider_fallback);
     }
 
     #[test]
     fn parse_run_cli_rejects_removed_config_format_flag() {
-        let err = parse_run_cli(&args(&[
+        let err = parse_cli(&[
+            "run",
             "--img-path",
             "test.png",
             "--config-format",
             "rapidocr",
-        ]))
+        ])
         .expect_err("removed flag should be rejected");
-        assert!(err.to_string().contains("unknown arg `--config-format`"));
+        assert!(
+            err.to_string()
+                .contains("unexpected argument '--config-format'")
+        );
+    }
+
+    #[test]
+    fn parse_run_cli_accepts_legacy_single_dash_img_alias() {
+        let cli = parse_cli(&["run", "-img", "test.png"]).expect("legacy alias should parse");
+        let Commands::Run(run) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(run.img_path.as_deref(), Some("test.png"));
     }
 }
