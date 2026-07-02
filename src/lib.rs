@@ -16,7 +16,7 @@ pub use config::{
     ColorOrder, LangCls, LangDet, LangRec, ModelConfig, ModelType, OcrVersion, ProviderPreference,
     RecImage, RecognizeOptions, RecognizerConfig, RuntimeBackend, RuntimeConfig, VisionBackend,
 };
-pub use error::{PaddleOcrError, Result};
+pub use error::{RapidOcrError, Result};
 pub use input::image_loader::{LoadImage, OcrInput};
 pub use output::json::OcrJsonItem;
 pub use pipeline::compat_rapidocr::{from_rapidocr_yaml_file, from_rapidocr_yaml_str};

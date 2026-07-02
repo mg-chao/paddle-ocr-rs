@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::{
     config::{LangCls, LangDet, LangRec, ModelType, OcrVersion},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
 };
 
 const DEFAULT_MODELS_YAML: &str = include_str!("../assets/default_models.yaml");
@@ -88,7 +88,7 @@ impl ModelRegistry {
             .onnxruntime
             .get(ocr_version.as_str())
             .ok_or_else(|| {
-                PaddleOcrError::ModelResolve(format!(
+                RapidOcrError::ModelResolve(format!(
                     "unsupported ocr version for onnxruntime: {}",
                     ocr_version.as_str()
                 ))
@@ -158,7 +158,7 @@ impl ModelRegistry {
             .onnxruntime
             .get(ocr_version.as_str())
             .ok_or_else(|| {
-                PaddleOcrError::ModelResolve(format!(
+                RapidOcrError::ModelResolve(format!(
                     "unsupported ocr version for onnxruntime: {}",
                     ocr_version.as_str()
                 ))
@@ -173,6 +173,10 @@ fn select_model<'a>(
     task: &str,
     ocr_version: OcrVersion,
 ) -> Result<(&'a String, &'a ModelEntry)> {
+    if ocr_version == OcrVersion::PPocrV6 {
+        return select_ppocr_v6_model(model_map, lang_prefix, model_type, task);
+    }
+
     let mut candidates: Vec<ModelCandidate<'a>> = model_map
         .iter()
         .filter(|(name, _)| language_tag_matches(name, lang_prefix))
@@ -185,7 +189,7 @@ fn select_model<'a>(
     candidates.sort_by(|a, b| a.name.cmp(b.name));
 
     if candidates.is_empty() {
-        return Err(PaddleOcrError::ModelResolve(format!(
+        return Err(RapidOcrError::ModelResolve(format!(
             "no {task} model found for lang={lang_prefix}, version={}",
             ocr_version.as_str()
         )));
@@ -206,8 +210,77 @@ fn select_model<'a>(
             lang_prefix,
             ocr_version,
         )?,
+        ModelType::Tiny | ModelType::Small | ModelType::Medium => {
+            return Err(RapidOcrError::ModelResolve(format!(
+                "{} {task} does not provide `{}` models; use `mobile` or `server`",
+                ocr_version.as_str(),
+                model_type.as_str()
+            )));
+        }
     };
     Ok((selected.name, selected.entry))
+}
+
+fn select_ppocr_v6_model<'a>(
+    model_map: &'a HashMap<String, ModelEntry>,
+    lang_prefix: &str,
+    model_type: ModelType,
+    task: &str,
+) -> Result<(&'a String, &'a ModelEntry)> {
+    validate_ppocr_v6_task(task)?;
+    validate_ppocr_v6_model_type(model_type, task)?;
+    validate_ppocr_v6_lang(lang_prefix, model_type, task)?;
+
+    let model_key = format!("multi_PP-OCRv6_{task}_{}", model_type.as_str());
+    model_map.get_key_value(&model_key).ok_or_else(|| {
+        RapidOcrError::ModelResolve(format!(
+            "missing PP-OCRv6 {task} model registry entry `{model_key}`"
+        ))
+    })
+}
+
+fn validate_ppocr_v6_task(task: &str) -> Result<()> {
+    if matches!(task, "det" | "rec") {
+        return Ok(());
+    }
+
+    Err(RapidOcrError::ModelResolve(format!(
+        "PP-OCRv6 {task} models are not available in the default onnxruntime registry"
+    )))
+}
+
+fn validate_ppocr_v6_model_type(model_type: ModelType, task: &str) -> Result<()> {
+    if matches!(
+        model_type,
+        ModelType::Tiny | ModelType::Small | ModelType::Medium
+    ) {
+        return Ok(());
+    }
+
+    Err(RapidOcrError::ModelResolve(format!(
+        "PP-OCRv6 {task} does not provide `{}` models; use `tiny`, `small`, or `medium`",
+        model_type.as_str()
+    )))
+}
+
+fn validate_ppocr_v6_lang(lang_prefix: &str, model_type: ModelType, task: &str) -> Result<()> {
+    let supported = (task == "det" && lang_prefix == "multi")
+        || match model_type {
+            ModelType::Tiny => matches!(lang_prefix, "ch" | "chinese_cht" | "en"),
+            ModelType::Small | ModelType::Medium => {
+                matches!(lang_prefix, "ch" | "chinese_cht" | "en" | "japan")
+            }
+            ModelType::Mobile | ModelType::Server => false,
+        };
+
+    if supported {
+        return Ok(());
+    }
+
+    Err(RapidOcrError::ModelResolve(format!(
+        "unsupported PP-OCRv6 {task} language `{lang_prefix}` for `{}` model",
+        model_type.as_str()
+    )))
 }
 
 fn select_unique_variant<'a>(
@@ -223,13 +296,13 @@ fn select_unique_variant<'a>(
         .filter(|candidate| candidate.variant == variant)
         .collect();
     if matched.is_empty() {
-        return Err(PaddleOcrError::ModelResolve(format!(
+        return Err(RapidOcrError::ModelResolve(format!(
             "no {variant:?} {task} model found for lang={lang_prefix}, version={}",
             ocr_version.as_str()
         )));
     }
     if matched.len() > 1 {
-        return Err(PaddleOcrError::ModelResolve(format!(
+        return Err(RapidOcrError::ModelResolve(format!(
             "ambiguous {variant:?} {task} models for lang={lang_prefix}, version={}: {}",
             ocr_version.as_str(),
             format_candidate_names(&matched)
@@ -327,6 +400,49 @@ onnxruntime:
             .resolve_cls(OcrVersion::PPocrV4, LangCls::Ch, ModelType::Mobile)
             .expect("cls model should resolve");
         assert!(cls.model_name.contains("cls"));
+    }
+
+    #[test]
+    fn resolve_ppocr_v6_size_models() {
+        let reg = ModelRegistry::from_default_yaml().expect("registry should parse");
+
+        let det = reg
+            .resolve_det(OcrVersion::PPocrV6, LangDet::Ch, ModelType::Small)
+            .expect("v6 det model should resolve");
+        assert_eq!(det.model_name, "multi_PP-OCRv6_det_small");
+        assert!(det.model_url.ends_with("PP-OCRv6_det_small.onnx"));
+
+        let rec = reg
+            .resolve_rec(OcrVersion::PPocrV6, LangRec::Ch, ModelType::Small)
+            .expect("v6 rec model should resolve");
+        assert_eq!(rec.model_name, "multi_PP-OCRv6_rec_small");
+        assert!(rec.model_url.ends_with("PP-OCRv6_rec_small.onnx"));
+        assert!(
+            rec.dict_url
+                .as_deref()
+                .is_some_and(|v| v.ends_with("ppocrv6_dict.txt"))
+        );
+    }
+
+    #[test]
+    fn resolve_ppocr_v6_rejects_legacy_model_type() {
+        let reg = ModelRegistry::from_default_yaml().expect("registry should parse");
+        let err = reg
+            .resolve_rec(OcrVersion::PPocrV6, LangRec::Ch, ModelType::Mobile)
+            .expect_err("v6 should require size-based model type");
+        assert!(err.to_string().contains("does not provide `mobile`"));
+    }
+
+    #[test]
+    fn resolve_ppocr_v6_tiny_rejects_japan_lang() {
+        let reg = ModelRegistry::from_default_yaml().expect("registry should parse");
+        let err = reg
+            .resolve_rec(OcrVersion::PPocrV6, LangRec::Japan, ModelType::Tiny)
+            .expect_err("v6 tiny should reject unsupported lang");
+        assert!(
+            err.to_string()
+                .contains("unsupported PP-OCRv6 rec language `japan`")
+        );
     }
 
     #[test]

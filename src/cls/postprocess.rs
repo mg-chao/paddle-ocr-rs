@@ -1,18 +1,18 @@
 use ndarray::ArrayView2;
 
-use crate::error::{PaddleOcrError, Result};
+use crate::error::{RapidOcrError, Result};
 
 pub fn decode_view(
     preds: ArrayView2<'_, f32>,
     label_list: &[String],
 ) -> Result<Vec<(String, f32)>> {
     if preds.ncols() == 0 {
-        return Err(PaddleOcrError::Decode(
+        return Err(RapidOcrError::Decode(
             "classifier output has zero columns".to_string(),
         ));
     }
     if label_list.is_empty() {
-        return Err(PaddleOcrError::Config(
+        return Err(RapidOcrError::Config(
             "classifier label_list cannot be empty".to_string(),
         ));
     }

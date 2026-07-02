@@ -16,7 +16,7 @@ pub fn to_json_items(
     scores: &[f32],
 ) -> Result<Vec<OcrJsonItem>> {
     if txts.len() != scores.len() {
-        return Err(crate::error::PaddleOcrError::InvalidInput(format!(
+        return Err(crate::error::RapidOcrError::InvalidInput(format!(
             "json output length mismatch: txts={}, scores={}",
             txts.len(),
             scores.len()
@@ -26,7 +26,7 @@ pub fn to_json_items(
     if let Some(boxes) = boxes
         && boxes.len() != txts.len()
     {
-        return Err(crate::error::PaddleOcrError::InvalidInput(format!(
+        return Err(crate::error::RapidOcrError::InvalidInput(format!(
             "json output length mismatch: boxes={}, txts={}",
             boxes.len(),
             txts.len()

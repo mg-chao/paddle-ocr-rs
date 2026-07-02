@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Quad,
     config::{LangDet, ModelType, OcrVersion, RecImage, RuntimeConfig},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     model_registry::ModelRegistry,
     model_store::{default_model_store_dir, ensure_downloaded, verify_existing_file},
     runtime::provider::ProviderResolution,
@@ -108,7 +108,7 @@ impl Detector {
                 model_store_dir,
             )?
         } else {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "detector model_path is not set and allow_download=false".to_string(),
             ));
         };
@@ -164,7 +164,7 @@ impl Detector {
             (1, 3, resized_h, resized_w),
             &self.batch_scratch[..3 * resized_h * resized_w],
         )
-        .map_err(|e| PaddleOcrError::InvalidInput(format!("invalid det batch shape: {e}")))?;
+        .map_err(|e| RapidOcrError::InvalidInput(format!("invalid det batch shape: {e}")))?;
         let post = &self.post;
         let infer_start = Instant::now();
         let mut postprocess_ms = 0.0_f32;

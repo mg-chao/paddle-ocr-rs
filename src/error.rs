@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum PaddleOcrError {
+pub enum RapidOcrError {
     #[error("invalid configuration: {0}")]
     Config(String),
 
@@ -51,4 +51,4 @@ pub enum PaddleOcrError {
     },
 }
 
-pub type Result<T> = std::result::Result<T, PaddleOcrError>;
+pub type Result<T> = std::result::Result<T, RapidOcrError>;

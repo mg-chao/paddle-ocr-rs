@@ -2,7 +2,7 @@
 use crate::vision::backend::OPENCV_BACKEND_DISABLED_MESSAGE;
 use crate::{
     config::{RecImage, VisionBackend},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     vision::{backend::resolve_backend_strict, resize::resize_bgr_inter_linear},
 };
 
@@ -20,7 +20,7 @@ pub fn resize_image(
     backend: VisionBackend,
 ) -> Result<RecImage> {
     if new_w == 0 || new_h == 0 {
-        return Err(PaddleOcrError::InvalidImage(
+        return Err(RapidOcrError::InvalidImage(
             "resize target width/height must be greater than zero".to_string(),
         ));
     }
@@ -71,10 +71,10 @@ fn rotate_180_image_pure_rust(img: &RecImage) -> Result<RecImage> {
 fn resize_image_opencv(img: &RecImage, new_w: usize, new_h: usize) -> Result<RecImage> {
     let src_bgr = img.as_bgr_cow();
     let src_1d = Mat::from_slice(src_bgr.as_ref())
-        .map_err(|e| PaddleOcrError::Config(format!("opencv Mat::from_slice failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv Mat::from_slice failed: {e}")))?;
     let src = src_1d
         .reshape(3, img.height() as i32)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv Mat::reshape failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv Mat::reshape failed: {e}")))?;
 
     let mut resized = Mat::default();
     imgproc::resize(
@@ -85,14 +85,14 @@ fn resize_image_opencv(img: &RecImage, new_w: usize, new_h: usize) -> Result<Rec
         0.0,
         imgproc::INTER_LINEAR,
     )
-    .map_err(|e| PaddleOcrError::Config(format!("opencv resize failed: {e}")))?;
+    .map_err(|e| RapidOcrError::Config(format!("opencv resize failed: {e}")))?;
 
     let data = resized
         .data_bytes()
-        .map_err(|e| PaddleOcrError::Config(format!("opencv data_bytes failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv data_bytes failed: {e}")))?;
     let row_step = resized
         .step1(0)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv step1 failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv step1 failed: {e}")))?;
     let mut out = vec![0_u8; new_w * new_h * 3];
     for y in 0..new_h {
         let src_off = y * row_step;
@@ -109,18 +109,18 @@ fn resize_image_opencv(img: &RecImage, new_w: usize, new_h: usize) -> Result<Rec
 fn rotate_180_image_opencv(img: &RecImage) -> Result<RecImage> {
     let src_bgr = img.as_bgr_cow();
     let src_1d = Mat::from_slice(src_bgr.as_ref())
-        .map_err(|e| PaddleOcrError::Config(format!("opencv Mat::from_slice failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv Mat::from_slice failed: {e}")))?;
     let src = src_1d
         .reshape(3, img.height() as i32)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv Mat::reshape failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv Mat::reshape failed: {e}")))?;
 
     let mut dst = Mat::default();
     core::rotate(&src, &mut dst, core::ROTATE_180)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv rotate failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv rotate failed: {e}")))?;
 
     let out = dst
         .data_bytes()
-        .map_err(|e| PaddleOcrError::Config(format!("opencv data_bytes failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv data_bytes failed: {e}")))?;
     RecImage::from_bgr_u8(img.width(), img.height(), out.to_vec())
 }
 
@@ -131,7 +131,7 @@ fn resize_image_opencv_dispatch(img: &RecImage, new_w: usize, new_h: usize) -> R
 
 #[cfg(not(feature = "opencv-backend"))]
 fn resize_image_opencv_dispatch(_img: &RecImage, _new_w: usize, _new_h: usize) -> Result<RecImage> {
-    Err(PaddleOcrError::Config(
+    Err(RapidOcrError::Config(
         OPENCV_BACKEND_DISABLED_MESSAGE.to_string(),
     ))
 }
@@ -143,7 +143,7 @@ fn rotate_180_image_opencv_dispatch(img: &RecImage) -> Result<RecImage> {
 
 #[cfg(not(feature = "opencv-backend"))]
 fn rotate_180_image_opencv_dispatch(_img: &RecImage) -> Result<RecImage> {
-    Err(PaddleOcrError::Config(
+    Err(RapidOcrError::Config(
         OPENCV_BACKEND_DISABLED_MESSAGE.to_string(),
     ))
 }

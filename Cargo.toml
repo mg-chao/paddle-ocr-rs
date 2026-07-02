@@ -1,12 +1,12 @@
 [package]
-name = "paddle-ocr-rs"
+name = "rapid-ocr-rs"
 version = "0.7.0"
 edition = "2024"
 readme = "README.md"
-keywords = ["paddle", "ocr", "onnx"]
+keywords = ["rapid", "ocr", "onnx"]
 license = "Apache-2.0"
 description = "Use Rust to call Paddle OCR models via ONNX Runtime for image text recognition."
-repository = "https://github.com/mg-chao/paddle-ocr-rs"
+repository = "https://github.com/mg-chao/rapid-ocr-rs"
 authors = ["mg-chao <chao@mgchao.top>"]
 
 [dependencies]

@@ -1,4 +1,4 @@
-use crate::error::{PaddleOcrError, Result};
+use crate::error::{RapidOcrError, Result};
 use rayon::prelude::*;
 
 fn check_dims(
@@ -9,21 +9,21 @@ fn check_dims(
     src_len: usize,
 ) -> Result<()> {
     if src_w == 0 || src_h == 0 {
-        return Err(PaddleOcrError::InvalidImage(
+        return Err(RapidOcrError::InvalidImage(
             "source width/height must be greater than zero".to_string(),
         ));
     }
     if dst_w == 0 || dst_h == 0 {
-        return Err(PaddleOcrError::InvalidImage(
+        return Err(RapidOcrError::InvalidImage(
             "destination width/height must be greater than zero".to_string(),
         ));
     }
     let expect = src_w
         .checked_mul(src_h)
         .and_then(|v| v.checked_mul(3))
-        .ok_or_else(|| PaddleOcrError::InvalidImage("source size overflow".to_string()))?;
+        .ok_or_else(|| RapidOcrError::InvalidImage("source size overflow".to_string()))?;
     if src_len != expect {
-        return Err(PaddleOcrError::InvalidImage(format!(
+        return Err(RapidOcrError::InvalidImage(format!(
             "invalid source BGR length: expected {expect}, got {src_len}"
         )));
     }
@@ -224,6 +224,10 @@ pub(crate) fn resize_bgr_inter_linear_into_with_scratch(
         out.extend_from_slice(src);
         return Ok(());
     }
+    if src_w == dst_w.saturating_mul(2) && src_h == dst_h.saturating_mul(2) {
+        resize_bgr_area_fast_2x2(src, src_w, dst_w, dst_h, out);
+        return Ok(());
+    }
 
     // Match OpenCV's internal order:
     // inv_scale = dst/src, then scale = 1.0 / inv_scale.
@@ -304,6 +308,36 @@ pub(crate) fn resize_bgr_inter_linear_into_with_scratch(
     }
 
     Ok(())
+}
+
+fn resize_bgr_area_fast_2x2(
+    src: &[u8],
+    src_w: usize,
+    dst_w: usize,
+    dst_h: usize,
+    out: &mut Vec<u8>,
+) {
+    out.resize(dst_w * dst_h * 3, 0);
+    let src_stride = src_w * 3;
+    let dst_stride = dst_w * 3;
+
+    for dy in 0..dst_h {
+        let src_y = dy * 2;
+        let row0 = src_y * src_stride;
+        let row1 = row0 + src_stride;
+        let dst_row = dy * dst_stride;
+        for dx in 0..dst_w {
+            let src_x = dx * 2 * 3;
+            let dst_x = dx * 3;
+            for c in 0..3 {
+                let sum = src[row0 + src_x + c] as u16
+                    + src[row0 + src_x + 3 + c] as u16
+                    + src[row1 + src_x + c] as u16
+                    + src[row1 + src_x + 3 + c] as u16;
+                out[dst_row + dst_x + c] = ((sum + 2) >> 2) as u8;
+            }
+        }
+    }
 }
 
 #[cfg(all(test, feature = "opencv-backend"))]
@@ -396,5 +430,41 @@ mod tests {
             max_abs <= 1,
             "real upscale max abs diff should be <= 1, got {max_abs}"
         );
+    }
+
+    #[test]
+    fn linear_resize_matches_opencv_exact_for_2x_downscale() {
+        let src_w = 18usize;
+        let src_h = 14usize;
+        let dst_w = src_w / 2;
+        let dst_h = src_h / 2;
+        let mut src = vec![0_u8; src_w * src_h * 3];
+        for y in 0..src_h {
+            for x in 0..src_w {
+                let i = (y * src_w + x) * 3;
+                src[i] = ((x * 17 + y * 9) % 256) as u8;
+                src[i + 1] = ((x * 3 + y * 23) % 256) as u8;
+                src[i + 2] = ((x * 29 + y * 5) % 256) as u8;
+            }
+        }
+
+        let ours =
+            resize_bgr_inter_linear(&src, src_w, src_h, dst_w, dst_h).expect("resize should work");
+
+        let src_1d = Mat::from_slice(&src).expect("mat from slice");
+        let src_mat = src_1d.reshape(3, src_h as i32).expect("reshape");
+        let mut dst = Mat::default();
+        imgproc::resize(
+            &src_mat,
+            &mut dst,
+            Size::new(dst_w as i32, dst_h as i32),
+            0.0,
+            0.0,
+            imgproc::INTER_LINEAR,
+        )
+        .expect("opencv resize");
+        let opencv = dst.data_bytes().expect("opencv bytes");
+
+        assert_eq!(ours, opencv);
     }
 }

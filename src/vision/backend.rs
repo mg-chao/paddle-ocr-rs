@@ -1,5 +1,5 @@
 #[cfg(not(feature = "opencv-backend"))]
-use crate::error::PaddleOcrError;
+use crate::error::RapidOcrError;
 use crate::{config::VisionBackend, error::Result};
 
 #[cfg_attr(feature = "opencv-backend", allow(dead_code))]
@@ -21,7 +21,7 @@ pub fn resolve_backend_strict(backend: VisionBackend) -> Result<VisionBackend> {
             }
             #[cfg(not(feature = "opencv-backend"))]
             {
-                Err(PaddleOcrError::Config(
+                Err(RapidOcrError::Config(
                     OPENCV_BACKEND_DISABLED_MESSAGE.to_string(),
                 ))
             }

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{LangCls, ModelType, OcrVersion, RecImage, RuntimeConfig, VisionBackend},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     model_registry::ModelRegistry,
     model_store::{default_model_store_dir, ensure_downloaded, verify_existing_file},
     runtime::provider::ProviderResolution,
@@ -68,7 +68,7 @@ pub struct Classifier {
 impl Classifier {
     pub fn new(config: ClassifierConfig) -> Result<Self> {
         if config.cls_batch_num == 0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "cls_batch_num must be greater than zero".to_string(),
             ));
         }
@@ -90,7 +90,7 @@ impl Classifier {
                 model_store_dir,
             )?
         } else {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "classifier model_path is not set and allow_download=false".to_string(),
             ));
         };
@@ -132,10 +132,10 @@ impl Classifier {
                 .checked_mul(img_h)
                 .and_then(|v| v.checked_mul(img_w))
                 .ok_or_else(|| {
-                    PaddleOcrError::InvalidInput("cls batch sample size overflow".to_string())
+                    RapidOcrError::InvalidInput("cls batch sample size overflow".to_string())
                 })?;
             let total_len = sample_len.checked_mul(batch_size).ok_or_else(|| {
-                PaddleOcrError::InvalidInput("cls batch size overflow".to_string())
+                RapidOcrError::InvalidInput("cls batch size overflow".to_string())
             })?;
             self.batch_scratch.resize(total_len, 0.0);
 
@@ -174,7 +174,7 @@ impl Classifier {
             let batch_view =
                 ArrayView4::from_shape((batch_size, img_c, img_h, img_w), &self.batch_scratch)
                     .map_err(|e| {
-                        PaddleOcrError::InvalidInput(format!("invalid cls batch tensor shape: {e}"))
+                        RapidOcrError::InvalidInput(format!("invalid cls batch tensor shape: {e}"))
                     })?;
 
             let label_list = &self.config.label_list;

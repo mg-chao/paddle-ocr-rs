@@ -6,7 +6,7 @@ use turbojpeg::{PixelFormat, decompress};
 
 use crate::{
     config::RecImage,
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
 };
 
 #[derive(Debug, Clone)]
@@ -117,7 +117,7 @@ impl LoadImage {
 
     fn load_path(&self, path: PathBuf) -> Result<RecImage> {
         if !path.exists() {
-            return Err(PaddleOcrError::FileNotFound(path));
+            return Err(RapidOcrError::FileNotFound(path));
         }
         let bytes = fs::read(path)?;
         self.decode_bytes_with_exif(&bytes, true)
@@ -126,7 +126,7 @@ impl LoadImage {
     fn load_url(&self, url: &str) -> Result<RecImage> {
         let response = reqwest::blocking::get(url)?;
         if !response.status().is_success() {
-            return Err(PaddleOcrError::Download(format!(
+            return Err(RapidOcrError::Download(format!(
                 "failed to fetch image from url {url}: HTTP {}",
                 response.status()
             )));
@@ -150,7 +150,7 @@ impl LoadImage {
         }
 
         let mut dyn_img = image::load_from_memory(bytes)
-            .map_err(|e| PaddleOcrError::InvalidImage(e.to_string()))?;
+            .map_err(|e| RapidOcrError::InvalidImage(e.to_string()))?;
         if apply_exif_transpose {
             dyn_img = apply_exif_orientation(dyn_img, orientation);
         }
@@ -188,18 +188,16 @@ fn apply_exif_orientation(img: DynamicImage, orientation: Option<u32>) -> Dynami
 
 fn decode_bytes_with_turbojpeg(bytes: &[u8]) -> Result<RecImage> {
     if !looks_like_jpeg(bytes) {
-        return Err(PaddleOcrError::InvalidImage(
-            "not a jpeg stream".to_string(),
-        ));
+        return Err(RapidOcrError::InvalidImage("not a jpeg stream".to_string()));
     }
 
     let decoded = decompress(bytes, PixelFormat::BGR)
-        .map_err(|e| PaddleOcrError::InvalidImage(format!("turbojpeg decode failed: {e}")))?;
+        .map_err(|e| RapidOcrError::InvalidImage(format!("turbojpeg decode failed: {e}")))?;
 
     let width = decoded.width;
     let height = decoded.height;
     if width == 0 || height == 0 {
-        return Err(PaddleOcrError::InvalidImage(
+        return Err(RapidOcrError::InvalidImage(
             "decoded image width/height cannot be zero".to_string(),
         ));
     }
@@ -350,9 +348,9 @@ fn ensure_len(width: usize, height: usize, channels: usize, actual_len: usize) -
     let expected = width
         .checked_mul(height)
         .and_then(|v| v.checked_mul(channels))
-        .ok_or_else(|| PaddleOcrError::InvalidImage("image dimensions overflow".to_string()))?;
+        .ok_or_else(|| RapidOcrError::InvalidImage("image dimensions overflow".to_string()))?;
     if expected != actual_len {
-        return Err(PaddleOcrError::InvalidImage(format!(
+        return Err(RapidOcrError::InvalidImage(format!(
             "raw input size mismatch: expected {expected}, got {actual_len}"
         )));
     }

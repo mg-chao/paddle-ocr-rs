@@ -4,7 +4,7 @@ use std::{
 };
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use paddle_ocr_rs::{
+use rapid_ocr_rs::{
     EngineConfig, LangRec, LoadImage, OcrInput, OcrResult, ProviderPreference, RapidOcrEngine,
     RunOptions,
 };

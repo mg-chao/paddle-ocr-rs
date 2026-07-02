@@ -9,7 +9,7 @@ use ndarray::Array3;
 use ndarray::{ArrayView2, ArrayView3, Axis, s};
 
 use crate::{
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     types::{WordInfo, WordType},
 };
 
@@ -28,15 +28,13 @@ impl CtcLabelDecoder {
         } else if let Some(path) = character_path {
             read_character_file(path)?
         } else {
-            return Err(PaddleOcrError::Decode(
+            return Err(RapidOcrError::Decode(
                 "character and character_path are both None".to_string(),
             ));
         };
 
         if character_list.is_empty() {
-            return Err(PaddleOcrError::Decode(
-                "character list is empty".to_string(),
-            ));
+            return Err(RapidOcrError::Decode("character list is empty".to_string()));
         }
 
         character_list.insert(0, "blank".to_string());
@@ -65,7 +63,7 @@ impl CtcLabelDecoder {
         max_wh_ratio: f32,
     ) -> Result<DecodeOutput> {
         if preds.ndim() != 3 {
-            return Err(PaddleOcrError::Decode(format!(
+            return Err(RapidOcrError::Decode(format!(
                 "preds must be rank 3, got rank {}",
                 preds.ndim()
             )));
@@ -73,12 +71,12 @@ impl CtcLabelDecoder {
 
         let (batch_size, _timesteps, class_num) = preds.dim();
         if class_num == 0 {
-            return Err(PaddleOcrError::Decode(
+            return Err(RapidOcrError::Decode(
                 "preds class dim cannot be zero".to_string(),
             ));
         }
         if return_word_box && wh_ratio_list.len() != batch_size {
-            return Err(PaddleOcrError::InvalidInput(format!(
+            return Err(RapidOcrError::InvalidInput(format!(
                 "wh_ratio_list length {} does not match batch size {} when return_word_box=true",
                 wh_ratio_list.len(),
                 batch_size
@@ -121,7 +119,7 @@ impl CtcLabelDecoder {
                     continue;
                 }
                 let ch = self.character.get(*token).ok_or_else(|| {
-                    PaddleOcrError::Decode(format!(
+                    RapidOcrError::Decode(format!(
                         "token id {} out of character range {}",
                         token,
                         self.character.len()

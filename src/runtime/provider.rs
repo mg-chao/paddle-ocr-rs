@@ -5,7 +5,7 @@ use ort::execution_providers::{
 
 use crate::{
     config::ProviderPreference,
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,7 +69,7 @@ pub fn resolve_execution_providers(
 
 fn device_id_to_i32(provider_name: &str, device_id: usize) -> Result<i32> {
     i32::try_from(device_id).map_err(|_| {
-        PaddleOcrError::Config(format!(
+        RapidOcrError::Config(format!(
             "invalid {provider_name} device_id {device_id}: value exceeds i32 range"
         ))
     })
@@ -181,7 +181,7 @@ fn decide_provider_resolution(
     }
 
     if fail_if_provider_unavailable {
-        return Err(PaddleOcrError::Config(format!(
+        return Err(RapidOcrError::Config(format!(
             "requested execution provider {} is unavailable and fail_if_provider_unavailable=true",
             format_provider_preference(requested)
         )));

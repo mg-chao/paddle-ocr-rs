@@ -5,7 +5,7 @@ use rayon::prelude::*;
 
 use crate::{
     config::{LangRec, RecImage, RecognizeOptions, RecognizerConfig, VisionBackend},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     model_registry::{ModelRegistry, ResolvedRecModel},
     model_store::{default_model_store_dir, ensure_downloaded, verify_existing_file},
     rec::{
@@ -32,13 +32,13 @@ pub struct Recognizer {
 impl Recognizer {
     pub fn new(config: RecognizerConfig) -> Result<Self> {
         if config.rec_img_shape[0] != 3 {
-            return Err(PaddleOcrError::Config(format!(
+            return Err(RapidOcrError::Config(format!(
                 "rec_img_shape must start with channel=3, got {:?}",
                 config.rec_img_shape
             )));
         }
         if config.rec_batch_num == 0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "rec_batch_num must be greater than zero".to_string(),
             ));
         }
@@ -123,11 +123,11 @@ impl Recognizer {
                 .checked_mul(img_height)
                 .and_then(|v| v.checked_mul(dst_width))
                 .ok_or_else(|| {
-                    PaddleOcrError::InvalidInput("rec batch sample size overflow".to_string())
+                    RapidOcrError::InvalidInput("rec batch sample size overflow".to_string())
                 })?;
             let batch_size = batch_indices.len();
             let total_len = sample_len.checked_mul(batch_size).ok_or_else(|| {
-                PaddleOcrError::InvalidInput("rec batch size overflow".to_string())
+                RapidOcrError::InvalidInput("rec batch size overflow".to_string())
             })?;
             self.batch_scratch.resize(total_len, 0.0);
 
@@ -139,7 +139,7 @@ impl Recognizer {
                         || (Vec::<u8>::new(), LinearResizeScratch::default()),
                         |(tmp_bgr, resize_scratch), (dst, image_idx)| {
                             let image = images.get(image_idx).ok_or_else(|| {
-                                PaddleOcrError::InvalidInput(format!(
+                                RapidOcrError::InvalidInput(format!(
                                     "batch index {image_idx} out of bounds for image count {}",
                                     images.len()
                                 ))
@@ -158,7 +158,7 @@ impl Recognizer {
             } else {
                 let image_idx = batch_indices[0];
                 let image = images.get(image_idx).ok_or_else(|| {
-                    PaddleOcrError::InvalidInput(format!(
+                    RapidOcrError::InvalidInput(format!(
                         "batch index {image_idx} out of bounds for image count {}",
                         images.len()
                     ))
@@ -181,7 +181,7 @@ impl Recognizer {
                 &self.batch_scratch[..total_len],
             )
             .map_err(|e| {
-                PaddleOcrError::InvalidInput(format!("invalid rec batch tensor shape: {e}"))
+                RapidOcrError::InvalidInput(format!("invalid rec batch tensor shape: {e}"))
             })?;
             let decoder = &self.decoder;
             let (line_results, word_results) =
@@ -242,7 +242,7 @@ fn resolve_model_path(
     }
 
     if !config.model.allow_download {
-        return Err(PaddleOcrError::Config(
+        return Err(RapidOcrError::Config(
             "model_path is not set and allow_download=false".to_string(),
         ));
     }
@@ -268,11 +268,149 @@ fn resolve_character_path(
     };
 
     if !config.model.allow_download {
-        return Err(PaddleOcrError::Config(
+        return Err(RapidOcrError::Config(
             "character metadata missing and dict download disabled".to_string(),
         ));
     }
 
     let path = ensure_downloaded(dict_url, None, model_store_dir)?;
     Ok(Some(path))
+}
+
+#[cfg(all(test, feature = "opencv-backend"))]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use crate::{
+        config::{
+            LangRec, ModelType, OcrVersion, ProviderPreference, RecImage, RecognizeOptions,
+            RecognizerConfig, RuntimeConfig, VisionBackend,
+        },
+        rec::recognizer::Recognizer,
+        runtime::provider::ResolvedExecutionProvider,
+    };
+
+    fn test_images() -> Vec<RecImage> {
+        let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        root.push("test");
+        root.push("test_files");
+
+        let mut paths = fs::read_dir(&root)
+            .expect("test fixture directory should exist")
+            .map(|entry| entry.expect("fixture entry should be readable").path())
+            .filter(|path| {
+                path.extension()
+                    .and_then(|v| v.to_str())
+                    .is_some_and(|ext| {
+                        matches!(ext.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg")
+                    })
+            })
+            .collect::<Vec<_>>();
+        paths.sort();
+
+        paths
+            .into_iter()
+            .map(|path| RecImage::from_path(&path).expect("fixture image should load"))
+            .collect()
+    }
+
+    fn recognizer_config(
+        version: OcrVersion,
+        model_type: ModelType,
+        vision_backend: VisionBackend,
+    ) -> RecognizerConfig {
+        let mut model_store_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        model_store_dir.push("target");
+        model_store_dir.push("rec-parity-models");
+
+        RecognizerConfig {
+            model: crate::config::ModelConfig {
+                lang: LangRec::Ch,
+                ocr_version: version,
+                model_type,
+                model_path: None,
+                rec_keys_path: None,
+                allow_download: true,
+            },
+            runtime: RuntimeConfig {
+                vision_backend,
+                auto_tune_threads: false,
+                intra_threads: Some(1),
+                inter_threads: Some(1),
+                rayon_threads: Some(1),
+                provider_preference: ProviderPreference::Cpu,
+                ..RuntimeConfig::default()
+            },
+            rec_batch_num: 6,
+            rec_img_shape: [3, 48, 320],
+            model_store_dir: Some(model_store_dir),
+        }
+    }
+
+    #[test]
+    #[ignore = "downloads v4/v5/v6 recognition models and runs ONNX inference on all image fixtures"]
+    fn pure_and_opencv_recognition_match_ch_v4_v5_v6_on_test_images() {
+        let images = test_images();
+        let versions = [
+            (OcrVersion::PPocrV4, ModelType::Mobile),
+            (OcrVersion::PPocrV5, ModelType::Mobile),
+            (OcrVersion::PPocrV6, ModelType::Small),
+        ];
+
+        for (version, model_type) in versions {
+            let mut pure = Recognizer::new(recognizer_config(
+                version,
+                model_type,
+                VisionBackend::PureRust,
+            ))
+            .expect("pure recognizer should initialize");
+            let mut opencv = Recognizer::new(recognizer_config(
+                version,
+                model_type,
+                VisionBackend::OpenCv,
+            ))
+            .expect("opencv recognizer should initialize");
+
+            assert!(matches!(
+                pure.provider_resolution().resolved,
+                ResolvedExecutionProvider::Cpu
+            ));
+            assert!(matches!(
+                opencv.provider_resolution().resolved,
+                ResolvedExecutionProvider::Cpu
+            ));
+
+            let opts = RecognizeOptions {
+                return_word_box: false,
+                return_single_char_box: false,
+            };
+            let pure_out = pure
+                .recognize(&images, opts)
+                .expect("pure recognition should run");
+            let opencv_out = opencv
+                .recognize(&images, opts)
+                .expect("opencv recognition should run");
+
+            assert_eq!(
+                pure_out.lines.len(),
+                opencv_out.lines.len(),
+                "line count mismatch for {version:?}"
+            );
+            for (idx, (pure_line, opencv_line)) in pure_out
+                .lines
+                .iter()
+                .zip(opencv_out.lines.iter())
+                .enumerate()
+            {
+                assert_eq!(
+                    pure_line.text, opencv_line.text,
+                    "text mismatch for {version:?} image index {idx}"
+                );
+                assert_eq!(
+                    pure_line.score, opencv_line.score,
+                    "score mismatch for {version:?} image index {idx}"
+                );
+            }
+        }
+    }
 }

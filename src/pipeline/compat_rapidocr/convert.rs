@@ -130,6 +130,9 @@ pub(crate) fn parse_model_type(value: String) -> Option<ModelType> {
     match value.as_str() {
         "mobile" => Some(ModelType::Mobile),
         "server" => Some(ModelType::Server),
+        "tiny" => Some(ModelType::Tiny),
+        "small" => Some(ModelType::Small),
+        "medium" => Some(ModelType::Medium),
         _ => None,
     }
 }
@@ -138,6 +141,7 @@ pub(crate) fn parse_ocr_version(value: String) -> Option<OcrVersion> {
     match value.as_str() {
         "PP-OCRv4" => Some(OcrVersion::PPocrV4),
         "PP-OCRv5" => Some(OcrVersion::PPocrV5),
+        "PP-OCRv6" => Some(OcrVersion::PPocrV6),
         _ => None,
     }
 }

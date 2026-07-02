@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use crate::{
     config::{RecImage, VisionBackend},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     vision::{
         backend::resolve_backend_strict,
         image_backend::{resize_image, rotate_180_image},
@@ -54,9 +54,9 @@ pub(crate) fn write_resize_norm_img_into_slice_with_scratch(
     let sample_len = img_c
         .checked_mul(img_h)
         .and_then(|v| v.checked_mul(img_w))
-        .ok_or_else(|| PaddleOcrError::InvalidInput("cls sample size overflow".to_string()))?;
+        .ok_or_else(|| RapidOcrError::InvalidInput("cls sample size overflow".to_string()))?;
     if dst.len() != sample_len {
-        return Err(PaddleOcrError::InvalidInput(format!(
+        return Err(RapidOcrError::InvalidInput(format!(
             "cls destination slice size mismatch: expected {sample_len}, got {}",
             dst.len()
         )));
@@ -113,11 +113,11 @@ fn resize_norm_img_impl(
     let sample_len = img_c
         .checked_mul(img_h)
         .and_then(|v| v.checked_mul(img_w))
-        .ok_or_else(|| PaddleOcrError::InvalidInput("cls sample size overflow".to_string()))?;
+        .ok_or_else(|| RapidOcrError::InvalidInput("cls sample size overflow".to_string()))?;
     let mut out = vec![0.0_f32; sample_len];
     write_resize_norm_img_into_slice_impl(img, cls_image_shape, backend, &mut out)?;
     Array3::from_shape_vec((img_c, img_h, img_w), out).map_err(|e| {
-        PaddleOcrError::InvalidInput(format!("failed to build cls normalized tensor: {e}"))
+        RapidOcrError::InvalidInput(format!("failed to build cls normalized tensor: {e}"))
     })
 }
 
@@ -136,9 +136,9 @@ fn write_resize_norm_img_into_slice_impl(
     let sample_len = img_c
         .checked_mul(img_h)
         .and_then(|v| v.checked_mul(img_w))
-        .ok_or_else(|| PaddleOcrError::InvalidInput("cls sample size overflow".to_string()))?;
+        .ok_or_else(|| RapidOcrError::InvalidInput("cls sample size overflow".to_string()))?;
     if dst.len() != sample_len {
-        return Err(PaddleOcrError::InvalidInput(format!(
+        return Err(RapidOcrError::InvalidInput(format!(
             "cls destination slice size mismatch: expected {sample_len}, got {}",
             dst.len()
         )));
@@ -207,12 +207,12 @@ fn signed_unit_lut() -> &'static [f32; 256] {
 fn validate_cls_shape(cls_image_shape: [usize; 3]) -> Result<(usize, usize, usize)> {
     let [img_c, img_h, img_w] = cls_image_shape;
     if img_c != 3 {
-        return Err(PaddleOcrError::Config(format!(
+        return Err(RapidOcrError::Config(format!(
             "cls_image_shape must start with 3 channels, got {img_c}"
         )));
     }
     if img_h == 0 || img_w == 0 {
-        return Err(PaddleOcrError::Config(
+        return Err(RapidOcrError::Config(
             "cls image shape dimensions must be greater than zero".to_string(),
         ));
     }

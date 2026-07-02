@@ -6,7 +6,7 @@ use std::{
 use image::ImageReader;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{PaddleOcrError, Result};
+use crate::error::{RapidOcrError, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ColorOrder {
@@ -38,6 +38,21 @@ pub enum ModelType {
     #[default]
     Mobile,
     Server,
+    Tiny,
+    Small,
+    Medium,
+}
+
+impl ModelType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mobile => "mobile",
+            Self::Server => "server",
+            Self::Tiny => "tiny",
+            Self::Small => "small",
+            Self::Medium => "medium",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -47,6 +62,8 @@ pub enum OcrVersion {
     PPocrV4,
     #[serde(rename = "PP-OCRv5")]
     PPocrV5,
+    #[serde(rename = "PP-OCRv6")]
+    PPocrV6,
 }
 
 impl OcrVersion {
@@ -54,6 +71,7 @@ impl OcrVersion {
         match self {
             Self::PPocrV4 => "PP-OCRv4",
             Self::PPocrV5 => "PP-OCRv5",
+            Self::PPocrV6 => "PP-OCRv6",
         }
     }
 }
@@ -261,9 +279,9 @@ impl RecImage {
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
         let image = ImageReader::open(path.as_ref())
-            .map_err(|e| PaddleOcrError::InvalidImage(e.to_string()))?
+            .map_err(|e| RapidOcrError::InvalidImage(e.to_string()))?
             .decode()
-            .map_err(|e| PaddleOcrError::InvalidImage(e.to_string()))?
+            .map_err(|e| RapidOcrError::InvalidImage(e.to_string()))?
             .to_rgb8();
 
         let (width, height) = image.dimensions();
@@ -286,7 +304,7 @@ impl RecImage {
         color_order: ColorOrder,
     ) -> Result<Self> {
         if width == 0 || height == 0 {
-            return Err(PaddleOcrError::InvalidImage(
+            return Err(RapidOcrError::InvalidImage(
                 "image width and height must be greater than zero".to_string(),
             ));
         }
@@ -294,10 +312,10 @@ impl RecImage {
         let expected = width
             .checked_mul(height)
             .and_then(|v| v.checked_mul(3))
-            .ok_or_else(|| PaddleOcrError::InvalidImage("image dimensions overflow".to_string()))?;
+            .ok_or_else(|| RapidOcrError::InvalidImage("image dimensions overflow".to_string()))?;
 
         if data.len() != expected {
-            return Err(PaddleOcrError::InvalidImage(format!(
+            return Err(RapidOcrError::InvalidImage(format!(
                 "image data size mismatch: expected {expected}, got {}",
                 data.len()
             )));

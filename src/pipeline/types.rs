@@ -2,7 +2,7 @@ use crate::{
     Quad,
     config::RecImage,
     det::detector::DetTimingBreakdown,
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     output::{
         OcrJsonItem, draw_ocr_result, draw_word_boxes, to_json_items, to_markdown,
         to_markdown_texts,
@@ -45,7 +45,7 @@ impl OcrOutput {
         match (self.boxes.as_deref(), self.txts.as_deref()) {
             (Some(boxes), Some(txts)) => to_markdown(boxes, txts),
             (None, Some(txts)) => Ok(to_markdown_texts(txts)),
-            (Some(_), None) => Err(PaddleOcrError::InvalidInput(
+            (Some(_), None) => Err(RapidOcrError::InvalidInput(
                 "markdown output requires txts when boxes are present".to_string(),
             )),
             (None, None) => Ok("No text detected.".to_string()),
@@ -221,7 +221,7 @@ impl OcrResult {
 }
 
 impl TryFrom<OcrOutput> for OcrResult {
-    type Error = PaddleOcrError;
+    type Error = RapidOcrError;
 
     fn try_from(value: OcrOutput) -> Result<Self> {
         let OcrOutput {
@@ -246,7 +246,7 @@ impl TryFrom<OcrOutput> for OcrResult {
         let mut lines = lines.unwrap_or_default();
 
         if !det_scores.is_empty() && det_scores.len() != boxes.len() {
-            return Err(PaddleOcrError::InvalidInput(format!(
+            return Err(RapidOcrError::InvalidInput(format!(
                 "det_scores length mismatch: boxes={}, det_scores={}",
                 boxes.len(),
                 det_scores.len()
@@ -255,7 +255,7 @@ impl TryFrom<OcrOutput> for OcrResult {
 
         if lines.is_empty() && !txts.is_empty() {
             if txts.len() != scores.len() {
-                return Err(PaddleOcrError::InvalidInput(format!(
+                return Err(RapidOcrError::InvalidInput(format!(
                     "text output length mismatch: txts={}, scores={}",
                     txts.len(),
                     scores.len()
@@ -279,14 +279,14 @@ impl TryFrom<OcrOutput> for OcrResult {
         }
 
         if txts.len() != scores.len() {
-            return Err(PaddleOcrError::InvalidInput(format!(
+            return Err(RapidOcrError::InvalidInput(format!(
                 "text output length mismatch: txts={}, scores={}",
                 txts.len(),
                 scores.len()
             )));
         }
         if !lines.is_empty() && lines.len() != txts.len() {
-            return Err(PaddleOcrError::InvalidInput(format!(
+            return Err(RapidOcrError::InvalidInput(format!(
                 "line output length mismatch: lines={}, txts={}",
                 lines.len(),
                 txts.len()
@@ -299,7 +299,7 @@ impl TryFrom<OcrOutput> for OcrResult {
 
         if has_boxes && has_lines {
             if boxes.len() != txts.len() {
-                return Err(PaddleOcrError::InvalidInput(format!(
+                return Err(RapidOcrError::InvalidInput(format!(
                     "full output length mismatch: boxes={}, txts={}",
                     boxes.len(),
                     txts.len()

@@ -4,7 +4,7 @@ use serde_yaml::Value;
 
 use crate::{
     config::ProviderPreference,
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     pipeline::config::EngineConfig,
 };
 
@@ -258,7 +258,7 @@ fn validate_engine_type(section: &Value, section_name: &str) -> Result<()> {
     if let Some(engine_type) = mapping_get(section, "engine_type").and_then(value_to_string)
         && engine_type != "onnxruntime"
     {
-        return Err(PaddleOcrError::Config(format!(
+        return Err(RapidOcrError::Config(format!(
             "only onnxruntime engine_type is supported in Rust v1, got `{engine_type}` in {section_name}"
         )));
     }
@@ -494,5 +494,32 @@ Rec:
         let cfg = from_rapidocr_yaml_str(yaml).expect("compat parse should pass");
         assert_eq!(cfg.det.model_type, ModelType::Server);
         assert_eq!(cfg.det.ocr_version, OcrVersion::PPocrV4);
+    }
+
+    #[test]
+    fn parse_rapidocr_yaml_accepts_ppocr_v6_size_models() {
+        let yaml = r#"
+Det:
+  engine_type: onnxruntime
+  lang_type: ch
+  ocr_version: PP-OCRv6
+  model_type: small
+Cls:
+  engine_type: onnxruntime
+  lang_type: ch
+  ocr_version: PP-OCRv4
+  model_type: mobile
+Rec:
+  engine_type: onnxruntime
+  lang_type: ch
+  ocr_version: PP-OCRv6
+  model_type: medium
+"#;
+        let cfg = from_rapidocr_yaml_str(yaml).expect("v6 compat parse should pass");
+        assert_eq!(cfg.det.ocr_version, OcrVersion::PPocrV6);
+        assert_eq!(cfg.det.model_type, ModelType::Small);
+        assert_eq!(cfg.rec.model.ocr_version, OcrVersion::PPocrV6);
+        assert_eq!(cfg.rec.model.model_type, ModelType::Medium);
+        assert_eq!(cfg.cls.ocr_version, OcrVersion::PPocrV4);
     }
 }

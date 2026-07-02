@@ -11,7 +11,7 @@ struct BoxProps {
 
 pub fn to_markdown(boxes: &[Quad], txts: &[String]) -> Result<String> {
     if boxes.len() != txts.len() {
-        return Err(crate::error::PaddleOcrError::InvalidInput(format!(
+        return Err(crate::error::RapidOcrError::InvalidInput(format!(
             "markdown output length mismatch: boxes={}, txts={}",
             boxes.len(),
             txts.len()

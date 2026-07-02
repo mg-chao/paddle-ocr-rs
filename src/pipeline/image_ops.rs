@@ -1,7 +1,7 @@
 use crate::{
     Quad,
     config::{RecImage, VisionBackend},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     vision::{
         image_backend::resize_image as resize_image_with_backend, rotate_crop::rotate_crop_image,
     },
@@ -49,7 +49,7 @@ pub fn apply_vertical_padding(
     let h = img.height();
     let w = img.width();
     if h == 0 || w == 0 {
-        return Err(PaddleOcrError::InvalidImage(
+        return Err(RapidOcrError::InvalidImage(
             "image width/height cannot be zero".to_string(),
         ));
     }

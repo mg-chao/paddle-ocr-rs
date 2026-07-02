@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use crate::{
     config::{RecImage, VisionBackend},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     vision::{
         backend::resolve_backend_strict,
         image_backend::resize_image,
@@ -81,15 +81,13 @@ pub fn make_batch_with_backend_by_indices(
     let sample_len = img_channel
         .checked_mul(img_height)
         .and_then(|v| v.checked_mul(dst_width))
-        .ok_or_else(|| {
-            PaddleOcrError::InvalidInput("rec batch sample size overflow".to_string())
-        })?;
+        .ok_or_else(|| RapidOcrError::InvalidInput("rec batch sample size overflow".to_string()))?;
     let batch_slice = batch.as_slice_mut().ok_or_else(|| {
-        PaddleOcrError::InvalidInput("rec batch buffer is not contiguous".to_string())
+        RapidOcrError::InvalidInput("rec batch buffer is not contiguous".to_string())
     })?;
     for (idx, image_idx) in indices.iter().copied().enumerate() {
         let image = images.get(image_idx).ok_or_else(|| {
-            PaddleOcrError::InvalidInput(format!(
+            RapidOcrError::InvalidInput(format!(
                 "batch index {image_idx} out of bounds for image count {}",
                 images.len()
             ))
@@ -149,9 +147,9 @@ pub(crate) fn write_resize_norm_img_into_slice_with_scratch(
     let sample_len = img_channel
         .checked_mul(img_height)
         .and_then(|v| v.checked_mul(dst_width))
-        .ok_or_else(|| PaddleOcrError::InvalidInput("rec sample size overflow".to_string()))?;
+        .ok_or_else(|| RapidOcrError::InvalidInput("rec sample size overflow".to_string()))?;
     if dst.len() != sample_len {
-        return Err(PaddleOcrError::InvalidInput(format!(
+        return Err(RapidOcrError::InvalidInput(format!(
             "rec destination slice size mismatch: expected {sample_len}, got {}",
             dst.len()
         )));
@@ -208,11 +206,11 @@ fn resize_norm_img_impl(
     let sample_len = img_channel
         .checked_mul(img_height)
         .and_then(|v| v.checked_mul(dst_width))
-        .ok_or_else(|| PaddleOcrError::InvalidInput("rec sample size overflow".to_string()))?;
+        .ok_or_else(|| RapidOcrError::InvalidInput("rec sample size overflow".to_string()))?;
     let mut out = vec![0.0_f32; sample_len];
     write_resize_norm_img_into_slice_impl(img, max_wh_ratio, rec_image_shape, backend, &mut out)?;
     Array3::from_shape_vec((img_channel, img_height, dst_width), out).map_err(|e| {
-        PaddleOcrError::InvalidInput(format!("failed to build rec normalized tensor: {e}"))
+        RapidOcrError::InvalidInput(format!("failed to build rec normalized tensor: {e}"))
     })
 }
 
@@ -227,9 +225,9 @@ fn write_resize_norm_img_into_slice_impl(
     let sample_len = img_channel
         .checked_mul(img_height)
         .and_then(|v| v.checked_mul(dst_width))
-        .ok_or_else(|| PaddleOcrError::InvalidInput("rec sample size overflow".to_string()))?;
+        .ok_or_else(|| RapidOcrError::InvalidInput("rec sample size overflow".to_string()))?;
     if dst.len() != sample_len {
-        return Err(PaddleOcrError::InvalidInput(format!(
+        return Err(RapidOcrError::InvalidInput(format!(
             "rec destination slice size mismatch: expected {sample_len}, got {}",
             dst.len()
         )));
@@ -300,17 +298,17 @@ fn validate_common(
 ) -> Result<(usize, usize, usize)> {
     let [img_channel, img_height, img_width] = rec_image_shape;
     if img_channel != 3 {
-        return Err(PaddleOcrError::Config(format!(
+        return Err(RapidOcrError::Config(format!(
             "rec_image_shape[0] must be 3, got {img_channel}"
         )));
     }
     if img_height == 0 {
-        return Err(PaddleOcrError::Config(
+        return Err(RapidOcrError::Config(
             "rec_image_shape[1] must be greater than zero".to_string(),
         ));
     }
     if max_wh_ratio <= 0.0 {
-        return Err(PaddleOcrError::InvalidInput(format!(
+        return Err(RapidOcrError::InvalidInput(format!(
             "max_wh_ratio must be greater than zero, got {max_wh_ratio}"
         )));
     }
@@ -320,7 +318,7 @@ fn validate_common(
     let dst_width = ((img_height as f64) * max_wh_ratio) as usize;
     let dst_width = dst_width.max(img_width);
     if dst_width == 0 {
-        return Err(PaddleOcrError::InvalidInput(format!(
+        return Err(RapidOcrError::InvalidInput(format!(
             "computed destination width is zero (img_height={img_height}, max_wh_ratio={max_wh_ratio})"
         )));
     }
@@ -341,6 +339,8 @@ mod tests {
         write_resize_norm_img_into_slice,
     };
     use crate::config::RecImage;
+    #[cfg(feature = "opencv-backend")]
+    use std::path::PathBuf;
 
     #[test]
     fn resize_norm_img_rejects_zero_height() {
@@ -418,6 +418,82 @@ mod tests {
         assert_eq!(arr_slice.len(), buf.len());
         for (a, b) in arr_slice.iter().zip(buf.iter()) {
             assert!((*a - *b).abs() <= f32::EPSILON);
+        }
+    }
+
+    #[cfg(feature = "opencv-backend")]
+    #[test]
+    fn pure_rec_preprocess_matches_opencv_on_test_images() {
+        let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        root.push("test");
+        root.push("test_files");
+        let images = [
+            "arabic.png",
+            "black_font_color_transparent.png",
+            "check_return_word_len.jpeg",
+            "ch_doc_server.png",
+            "ch_en_num.jpg",
+            "cyrillic.png",
+            "devanagari.jpg",
+            "devanagari_rec.png",
+            "el_rec.jpg",
+            "empty_black.jpg",
+            "en.jpg",
+            "en_rec.jpg",
+            "eslav.jpg",
+            "img_exif_orientation.jpg",
+            "issue_170.png",
+            "japan.jpg",
+            "korean.jpg",
+            "latin.jpg",
+            "return_word_debug.jpg",
+            "short.png",
+            "ta.png",
+            "te.png",
+            "test_letterbox_like.jpg",
+            "test_without_det.jpg",
+            "text_cls.jpg",
+            "text_det.jpg",
+            "text_rec.jpg",
+            "text_vertical_words.png",
+            "th_rec.jpg",
+            "white_font_color_transparent.png",
+        ];
+
+        for name in images {
+            let mut path = root.clone();
+            path.push(name);
+            let image = RecImage::from_path(&path).expect("fixture image should load");
+            let max_wh_ratio =
+                (320.0_f64 / 48.0_f64).max(image.width() as f64 / image.height() as f64);
+            let pure = super::resize_norm_img_with_backend(
+                &image,
+                max_wh_ratio,
+                [3, 48, 320],
+                VisionBackend::PureRust,
+            )
+            .expect("pure preprocess should work");
+            let opencv = super::resize_norm_img_with_backend(
+                &image,
+                max_wh_ratio,
+                [3, 48, 320],
+                VisionBackend::OpenCv,
+            )
+            .expect("opencv preprocess should work");
+
+            assert_eq!(pure.shape(), opencv.shape(), "shape mismatch for {name}");
+            let pure = pure.as_slice().expect("pure tensor should be contiguous");
+            let opencv = opencv
+                .as_slice()
+                .expect("opencv tensor should be contiguous");
+            assert_eq!(
+                pure.len(),
+                opencv.len(),
+                "tensor length mismatch for {name}"
+            );
+            for (idx, (a, b)) in pure.iter().zip(opencv.iter()).enumerate() {
+                assert_eq!(*a, *b, "tensor mismatch for {name} at flat index {idx}");
+            }
         }
     }
 }

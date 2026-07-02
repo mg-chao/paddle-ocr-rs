@@ -2,7 +2,7 @@ use rayon::prelude::*;
 
 use crate::{
     config::{RecImage, VisionBackend},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     vision::{
         backend::resolve_backend_strict,
         image_backend::resize_image,
@@ -51,7 +51,7 @@ impl DetPreProcess {
             .checked_mul(resize_h)
             .and_then(|v| v.checked_mul(resize_w))
             .ok_or_else(|| {
-                PaddleOcrError::InvalidInput("det output buffer size overflow".to_string())
+                RapidOcrError::InvalidInput("det output buffer size overflow".to_string())
             })?;
         buffer.resize(expected_len, 0.0);
 
@@ -88,7 +88,7 @@ impl DetPreProcess {
         let h = img.height();
         let w = img.width();
         if h == 0 || w == 0 {
-            return Err(PaddleOcrError::InvalidImage(
+            return Err(RapidOcrError::InvalidImage(
                 "detector image width/height cannot be zero".to_string(),
             ));
         }
@@ -133,17 +133,17 @@ impl DetPreProcess {
             .checked_mul(height)
             .and_then(|v| v.checked_mul(width))
             .ok_or_else(|| {
-                PaddleOcrError::InvalidInput("det output buffer size overflow".to_string())
+                RapidOcrError::InvalidInput("det output buffer size overflow".to_string())
             })?;
         let expected_src_len = expected_len;
         if src.len() != expected_src_len {
-            return Err(PaddleOcrError::InvalidInput(format!(
+            return Err(RapidOcrError::InvalidInput(format!(
                 "det source BGR size mismatch: expected {expected_src_len}, got {}",
                 src.len()
             )));
         }
         if out_slice.len() != expected_len {
-            return Err(PaddleOcrError::InvalidInput(format!(
+            return Err(RapidOcrError::InvalidInput(format!(
                 "det output buffer size mismatch: expected {expected_len}, got {}",
                 out_slice.len()
             )));

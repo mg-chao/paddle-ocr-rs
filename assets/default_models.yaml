@@ -135,3 +135,27 @@ onnxruntime:
         model_dir: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.6.0/onnx/PP-OCRv5/rec/th_PP-OCRv5_rec_mobile_infer.onnx
         SHA256: de541dd83161c241ff426f7ecfd602a0ba77d686cf3ab9a6c255ea82fd08006e
         dict_url: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.6.0/paddle/PP-OCRv5/rec/th_PP-OCRv5_rec_mobile_infer/ppocrv5_th_dict.txt
+  PP-OCRv6:
+    det:
+      multi_PP-OCRv6_det_tiny:
+        model_dir: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1/onnx/PP-OCRv6/det/PP-OCRv6_det_tiny.onnx
+        SHA256: f42c0fbd294d95eac1a550e131b277dac97462c8025fa4b6c3cec1b7894bd3d5
+      multi_PP-OCRv6_det_small:
+        model_dir: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx
+        SHA256: 090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f
+      multi_PP-OCRv6_det_medium:
+        model_dir: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1/onnx/PP-OCRv6/det/PP-OCRv6_det_medium.onnx
+        SHA256: 92078b7355007ccfffcd4c8cd441a3afd4538904d06881b29a155e1e679907c2
+    rec:
+      multi_PP-OCRv6_rec_tiny:
+        model_dir: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1/onnx/PP-OCRv6/rec/PP-OCRv6_rec_tiny.onnx
+        SHA256: e16e242de5937ad92609223f19bc2aff3727ee40b095f996907c24749bad251b
+        dict_url: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1/paddle/PP-OCRv6/rec/PP-OCRv6_rec_tiny/ppocrv6_tiny_dict.txt
+      multi_PP-OCRv6_rec_small:
+        model_dir: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx
+        SHA256: 6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884
+        dict_url: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1/paddle/PP-OCRv6/rec/PP-OCRv6_rec_small/ppocrv6_dict.txt
+      multi_PP-OCRv6_rec_medium:
+        model_dir: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1/onnx/PP-OCRv6/rec/PP-OCRv6_rec_medium.onnx
+        SHA256: eef444829dbbe18d7fea59a3f6eb75647518d2b3a9568d27c92e42940204894b
+        dict_url: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.1/paddle/PP-OCRv6/rec/PP-OCRv6_rec_medium/ppocrv6_dict.txt

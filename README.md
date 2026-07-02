@@ -1,6 +1,6 @@
-# paddle-ocr-rs
+# rapid-ocr-rs
 
-`paddle-ocr-rs` is a Rust OCR project that runs PaddleOCR-family ONNX models with ONNX Runtime.
+`rapid-ocr-rs` is a Rust OCR project that runs PaddleOCR-family ONNX models with ONNX Runtime.
 It provides:
 
 ## Implementation Reference

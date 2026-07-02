@@ -8,12 +8,12 @@ use std::{
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
-use crate::error::{PaddleOcrError, Result};
+use crate::error::{RapidOcrError, Result};
 
 pub fn default_model_store_dir() -> PathBuf {
     if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
         return PathBuf::from(local_app_data)
-            .join("paddle-ocr-rs")
+            .join("rapid-ocr-rs")
             .join("models");
     }
 
@@ -23,10 +23,10 @@ pub fn default_model_store_dir() -> PathBuf {
 pub fn verify_existing_file(path: impl AsRef<Path>) -> Result<PathBuf> {
     let path = path.as_ref().to_path_buf();
     if !path.exists() {
-        return Err(PaddleOcrError::FileNotFound(path));
+        return Err(RapidOcrError::FileNotFound(path));
     }
     if !path.is_file() {
-        return Err(PaddleOcrError::Config(format!(
+        return Err(RapidOcrError::Config(format!(
             "expected a file path, got directory: {}",
             path.display()
         )));
@@ -62,9 +62,16 @@ pub fn ensure_downloaded(
     }
 
     let client = build_http_client()?;
-    let mut response = client.get(file_url).send()?;
+    let mut response = client
+        .get(file_url)
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 (compatible; rapid-ocr-rs model downloader)",
+        )
+        .header(reqwest::header::REFERER, "https://www.modelscope.cn/")
+        .send()?;
     if !response.status().is_success() {
-        return Err(PaddleOcrError::Download(format!(
+        return Err(RapidOcrError::Download(format!(
             "failed to download {file_url}: HTTP {}",
             response.status()
         )));
@@ -88,7 +95,7 @@ pub fn ensure_downloaded(
         let actual = format!("{:x}", hasher.finalize());
         if !actual.eq_ignore_ascii_case(expected) {
             let _ = fs::remove_file(&tmp_path);
-            return Err(PaddleOcrError::HashMismatch {
+            return Err(RapidOcrError::HashMismatch {
                 path: target_path,
                 expected: expected.to_string(),
                 actual,
@@ -118,7 +125,7 @@ fn extract_file_name(url: &str) -> Result<String> {
         .next()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
-            PaddleOcrError::Download(format!("cannot extract file name from url: {url}"))
+            RapidOcrError::Download(format!("cannot extract file name from url: {url}"))
         })?;
     Ok(file_name.to_string())
 }

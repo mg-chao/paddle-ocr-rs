@@ -11,7 +11,7 @@ use crate::vision::backend::default_backend;
 use crate::{
     Quad,
     config::{RecImage, VisionBackend},
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
     types::{LineResult, WordBox, WordInfo, WordType},
     vision::backend::resolve_backend_strict,
 };
@@ -47,7 +47,7 @@ pub fn compute_word_boxes_with_backend(
 ) -> Result<Vec<Vec<WordBox>>> {
     let backend = resolve_backend_strict(backend)?;
     if imgs.len() != dt_boxes.len() || imgs.len() != lines.len() {
-        return Err(PaddleOcrError::InvalidInput(format!(
+        return Err(RapidOcrError::InvalidInput(format!(
             "compute_word_boxes input length mismatch: imgs={}, dt_boxes={}, lines={}",
             imgs.len(),
             dt_boxes.len(),
@@ -390,44 +390,44 @@ fn reverse_rotate_crop_image_opencv(
     ];
 
     let m = imgproc::get_perspective_transform_slice(&src, &dst, core::DECOMP_LU).map_err(|e| {
-        PaddleOcrError::Config(format!("opencv getPerspectiveTransform failed: {e}"))
+        RapidOcrError::Config(format!("opencv getPerspectiveTransform failed: {e}"))
     })?;
 
     let mut inv = Mat::default();
     core::invert(&m, &mut inv, core::DECOMP_LU)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv invert failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv invert failed: {e}")))?;
 
     let mut inv64 = Mat::default();
     inv.convert_to(&mut inv64, core::CV_64F, 1.0, 0.0)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv convert_to(CV_64F) failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv convert_to(CV_64F) failed: {e}")))?;
 
     let h00 = *inv64
         .at_2d::<f64>(0, 0)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv mat access failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv mat access failed: {e}")))?;
     let h01 = *inv64
         .at_2d::<f64>(0, 1)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv mat access failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv mat access failed: {e}")))?;
     let h02 = *inv64
         .at_2d::<f64>(0, 2)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv mat access failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv mat access failed: {e}")))?;
     let h10 = *inv64
         .at_2d::<f64>(1, 0)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv mat access failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv mat access failed: {e}")))?;
     let h11 = *inv64
         .at_2d::<f64>(1, 1)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv mat access failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv mat access failed: {e}")))?;
     let h12 = *inv64
         .at_2d::<f64>(1, 2)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv mat access failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv mat access failed: {e}")))?;
     let h20 = *inv64
         .at_2d::<f64>(2, 0)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv mat access failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv mat access failed: {e}")))?;
     let h21 = *inv64
         .at_2d::<f64>(2, 1)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv mat access failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv mat access failed: {e}")))?;
     let h22 = *inv64
         .at_2d::<f64>(2, 2)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv mat access failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv mat access failed: {e}")))?;
 
     let mut out = Vec::with_capacity(word_points_list.len());
     for word_points in word_points_list {
@@ -562,7 +562,7 @@ fn l2(a: [f32; 2], b: [f32; 2]) -> f32 {
 mod tests {
     use crate::{
         config::RecImage,
-        error::PaddleOcrError,
+        error::RapidOcrError,
         types::{LineResult, WordInfo, WordType},
     };
 
@@ -602,7 +602,7 @@ mod tests {
 
         let err = compute_word_boxes(&[img], &det, &[line.clone(), line], false)
             .expect_err("should reject mismatched lengths");
-        assert!(matches!(err, PaddleOcrError::InvalidInput(_)));
+        assert!(matches!(err, RapidOcrError::InvalidInput(_)));
     }
 
     #[test]
@@ -624,7 +624,7 @@ mod tests {
                 crate::config::VisionBackend::OpenCv,
             )
             .expect_err("must reject opencv backend without feature");
-            assert!(matches!(err, PaddleOcrError::Config(_)));
+            assert!(matches!(err, RapidOcrError::Config(_)));
         }
     }
 }

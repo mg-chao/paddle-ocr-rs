@@ -5,7 +5,7 @@ use std::{
 };
 
 use clap::Parser;
-use paddle_ocr_rs::{EngineConfig, OcrInput, OcrResult, RapidOcrEngine, RunOptions, StageTimings};
+use rapid_ocr_rs::{EngineConfig, OcrInput, OcrResult, RapidOcrEngine, RunOptions, StageTimings};
 use serde_json::json;
 
 fn main() {

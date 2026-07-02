@@ -1,4 +1,4 @@
-use nalgebra::{SMatrix, SVector};
+use nalgebra::SMatrix;
 #[cfg(feature = "opencv-backend")]
 use opencv::{
     core::{self, Mat, Point2f, Scalar, Size},
@@ -8,7 +8,7 @@ use opencv::{
 use std::sync::OnceLock;
 
 #[cfg(feature = "opencv-backend")]
-use crate::error::PaddleOcrError;
+use crate::error::RapidOcrError;
 #[cfg(not(feature = "opencv-backend"))]
 use crate::vision::backend::OPENCV_BACKEND_DISABLED_MESSAGE;
 use crate::{
@@ -74,18 +74,20 @@ fn rotate_crop_image_pure(img: &RecImage, points: Quad) -> Result<RecImage> {
 
     for y in 0..crop_h {
         let yy = y as f64;
-        let mut fx_num = h01 * yy + h02;
-        let mut fy_num = h11 * yy + h12;
-        let mut fw_num = h21 * yy + h22;
+        let x0 = h01 * yy + h02;
+        let y0 = h11 * yy + h12;
+        let w0 = h21 * yy + h22;
         for x in 0..crop_w {
-            let inv = if fw_num.abs() > f64::EPSILON {
-                INTER_TAB_SIZE_F64 / fw_num
+            let xx = x as f64;
+            let fw = w0 + h20 * xx;
+            let inv = if fw.abs() > f64::EPSILON {
+                INTER_TAB_SIZE_F64 / fw
             } else {
                 0.0
             };
 
-            let fx = fx_num * inv;
-            let fy = fy_num * inv;
+            let fx = (x0 + h00 * xx) * inv;
+            let fy = (y0 + h10 * xx) * inv;
 
             let x_scaled = saturate_cast_i32_round(fx);
             let y_scaled = saturate_cast_i32_round(fy);
@@ -125,10 +127,6 @@ fn rotate_crop_image_pure(img: &RecImage, points: Quad) -> Result<RecImage> {
             dst[dst_idx] = v_b.clamp(0, 255) as u8;
             dst[dst_idx + 1] = v_g.clamp(0, 255) as u8;
             dst[dst_idx + 2] = v_r.clamp(0, 255) as u8;
-
-            fx_num += h00;
-            fy_num += h10;
-            fw_num += h20;
         }
     }
 
@@ -162,15 +160,15 @@ fn rotate_crop_image_opencv(img: &RecImage, points: Quad) -> Result<RecImage> {
     ];
 
     let m = imgproc::get_perspective_transform_slice(&src_pts, &pts_std, core::DECOMP_LU).map_err(
-        |e| PaddleOcrError::Config(format!("opencv getPerspectiveTransform failed: {e}")),
+        |e| RapidOcrError::Config(format!("opencv getPerspectiveTransform failed: {e}")),
     )?;
 
     let src_bgr = img.as_bgr_cow();
     let src_1d = Mat::from_slice(src_bgr.as_ref())
-        .map_err(|e| PaddleOcrError::Config(format!("opencv Mat::from_slice failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv Mat::from_slice failed: {e}")))?;
     let src = src_1d
         .reshape(3, img.height() as i32)
-        .map_err(|e| PaddleOcrError::Config(format!("opencv Mat::reshape failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv Mat::reshape failed: {e}")))?;
 
     let mut dst = Mat::default();
     imgproc::warp_perspective(
@@ -182,11 +180,11 @@ fn rotate_crop_image_opencv(img: &RecImage, points: Quad) -> Result<RecImage> {
         core::BORDER_REPLICATE,
         Scalar::all(0.0),
     )
-    .map_err(|e| PaddleOcrError::Config(format!("opencv warpPerspective failed: {e}")))?;
+    .map_err(|e| RapidOcrError::Config(format!("opencv warpPerspective failed: {e}")))?;
 
     let out = dst
         .data_bytes()
-        .map_err(|e| PaddleOcrError::Config(format!("opencv data_bytes failed: {e}")))?;
+        .map_err(|e| RapidOcrError::Config(format!("opencv data_bytes failed: {e}")))?;
     RecImage::from_bgr_u8(
         img_crop_width as usize,
         img_crop_height as usize,
@@ -215,7 +213,7 @@ fn try_axis_aligned_crop(img: &RecImage, points: Quad) -> Result<Option<RecImage
     let top = points[0][1].min(points[1][1]).round_ties_even() as i32;
     let bottom = points[2][1].max(points[3][1]).round_ties_even() as i32;
 
-    // Keep parity with cv2.warpPerspective + PaddleOCR dest points for axis-aligned boxes:
+    // Keep parity with cv2.warpPerspective + RapidOCR dest points for axis-aligned boxes:
     // [x0, x1) and [y0, y1), where x1/y1 are the right/bottom vertices.
     let x0 = left.clamp(0, img_w - 1);
     let x1 = right.clamp(0, img_w);
@@ -251,7 +249,7 @@ fn rotate_crop_image_opencv_dispatch(img: &RecImage, points: Quad) -> Result<Rec
 
 #[cfg(not(feature = "opencv-backend"))]
 fn rotate_crop_image_opencv_dispatch(_img: &RecImage, _points: Quad) -> Result<RecImage> {
-    Err(crate::error::PaddleOcrError::Config(
+    Err(crate::error::RapidOcrError::Config(
         OPENCV_BACKEND_DISABLED_MESSAGE.to_string(),
     ))
 }
@@ -358,8 +356,8 @@ fn bicubic_remap_tab() -> &'static Vec<[i16; 16]> {
 }
 
 fn homography_from_4pt(src: Quad, dst: Quad) -> SMatrix<f64, 3, 3> {
-    let mut a = SMatrix::<f64, 8, 8>::zeros();
-    let mut b = SVector::<f64, 8>::zeros();
+    let mut a = [[0.0_f64; 8]; 8];
+    let mut b = [0.0_f64; 8];
 
     for i in 0..4 {
         let x = src[i][0] as f64;
@@ -367,29 +365,77 @@ fn homography_from_4pt(src: Quad, dst: Quad) -> SMatrix<f64, 3, 3> {
         let x_cap = dst[i][0] as f64;
         let y_cap = dst[i][1] as f64;
 
-        let r0 = i * 2;
-        let r1 = r0 + 1;
+        a[i][0] = x;
+        a[i][1] = y;
+        a[i][2] = 1.0;
+        a[i][6] = -x * x_cap;
+        a[i][7] = -y * x_cap;
+        b[i] = x_cap;
 
-        a[(r0, 0)] = x;
-        a[(r0, 1)] = y;
-        a[(r0, 2)] = 1.0;
-        a[(r0, 6)] = -x * x_cap;
-        a[(r0, 7)] = -y * x_cap;
-        b[r0] = x_cap;
-
-        a[(r1, 3)] = x;
-        a[(r1, 4)] = y;
-        a[(r1, 5)] = 1.0;
-        a[(r1, 6)] = -x * y_cap;
-        a[(r1, 7)] = -y * y_cap;
-        b[r1] = y_cap;
+        let row = i + 4;
+        a[row][3] = x;
+        a[row][4] = y;
+        a[row][5] = 1.0;
+        a[row][6] = -x * y_cap;
+        a[row][7] = -y * y_cap;
+        b[row] = y_cap;
     }
 
-    if let Some(h) = a.full_piv_lu().solve(&b) {
-        SMatrix::<f64, 3, 3>::from_row_slice(&[h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1.0])
+    if lu_solve_opencv_8x8(&mut a, &mut b) {
+        SMatrix::<f64, 3, 3>::from_row_slice(&[b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], 1.0])
     } else {
         SMatrix::<f64, 3, 3>::identity()
     }
+}
+
+fn lu_solve_opencv_8x8(a: &mut [[f64; 8]; 8], b: &mut [f64; 8]) -> bool {
+    const M: usize = 8;
+    const EPS: f64 = f64::EPSILON * 100.0;
+
+    for i in 0..M {
+        let mut pivot = i;
+        for j in i + 1..M {
+            if a[j][i].abs() > a[pivot][i].abs() {
+                pivot = j;
+            }
+        }
+
+        if a[pivot][i].abs() < EPS {
+            return false;
+        }
+
+        if pivot != i {
+            let mut j = i;
+            while j < M {
+                let tmp = a[i][j];
+                a[i][j] = a[pivot][j];
+                a[pivot][j] = tmp;
+                j += 1;
+            }
+            b.swap(i, pivot);
+        }
+
+        let d = -1.0 / a[i][i];
+        for j in i + 1..M {
+            let alpha = a[j][i] * d;
+            let mut k = i + 1;
+            while k < M {
+                a[j][k] += alpha * a[i][k];
+                k += 1;
+            }
+            b[j] += alpha * b[i];
+        }
+    }
+
+    for i in (0..M).rev() {
+        let mut s = b[i];
+        for k in i + 1..M {
+            s -= a[i][k] * b[k];
+        }
+        b[i] = s / a[i][i];
+    }
+
+    true
 }
 
 fn l2(a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -417,13 +463,27 @@ mod tests {
         RecImage::from_bgr_u8(width, height, data).expect("gradient image should be valid")
     }
 
-    fn max_abs_diff(a: &[u8], b: &[u8]) -> u8 {
-        let mut out = 0_u8;
-        for (x, y) in a.iter().zip(b.iter()) {
+    fn assert_same_pixels(pure: &RecImage, opcv: &RecImage) {
+        let pure = pure.as_bgr_bytes();
+        let opcv = opcv.as_bgr_bytes();
+        assert_eq!(pure.len(), opcv.len());
+
+        let mut max_abs = 0_u8;
+        let mut diff_count = 0_usize;
+        let mut first_diff = None;
+        for (idx, (x, y)) in pure.iter().zip(opcv.iter()).enumerate() {
             let d = (*x as i16 - *y as i16).unsigned_abs() as u8;
-            out = out.max(d);
+            if d != 0 {
+                diff_count += 1;
+                first_diff.get_or_insert((idx, *x, *y));
+            }
+            max_abs = max_abs.max(d);
         }
-        out
+
+        assert_eq!(
+            diff_count, 0,
+            "pixel mismatch: diff_count={diff_count}, max_abs={max_abs}, first_diff={first_diff:?}"
+        );
     }
 
     #[test]
@@ -434,11 +494,7 @@ mod tests {
         let opcv = rotate_crop_image(&img, box_, VisionBackend::OpenCv).expect("opencv crop");
         assert_eq!(pure.width(), opcv.width());
         assert_eq!(pure.height(), opcv.height());
-        let d = max_abs_diff(&pure.as_bgr_bytes(), &opcv.as_bgr_bytes());
-        assert!(
-            d <= 2,
-            "axis-aligned crop max abs diff should be <=2, got {d}"
-        );
+        assert_same_pixels(&pure, &opcv);
     }
 
     #[test]
@@ -449,8 +505,7 @@ mod tests {
         let opcv = rotate_crop_image(&img, box_, VisionBackend::OpenCv).expect("opencv crop");
         assert_eq!(pure.width(), opcv.width());
         assert_eq!(pure.height(), opcv.height());
-        let d = max_abs_diff(&pure.as_bgr_bytes(), &opcv.as_bgr_bytes());
-        assert!(d <= 8, "quad crop max abs diff should be <=8, got {d}");
+        assert_same_pixels(&pure, &opcv);
     }
 
     #[test]
@@ -465,8 +520,7 @@ mod tests {
         let opcv = rotate_crop_image(&img, box_, VisionBackend::OpenCv).expect("opencv crop");
         assert_eq!(pure.width(), opcv.width());
         assert_eq!(pure.height(), opcv.height());
-        let d = max_abs_diff(&pure.as_bgr_bytes(), &opcv.as_bgr_bytes());
-        assert!(d <= 8, "real te crop max abs diff should be <=8, got {d}");
+        assert_same_pixels(&pure, &opcv);
     }
 
     #[test]
@@ -481,8 +535,7 @@ mod tests {
         let opcv = rotate_crop_image(&img, box_, VisionBackend::OpenCv).expect("opencv crop");
         assert_eq!(pure.width(), opcv.width());
         assert_eq!(pure.height(), opcv.height());
-        let d = max_abs_diff(&pure.as_bgr_bytes(), &opcv.as_bgr_bytes());
-        assert!(d <= 4, "real en crop max abs diff should be <=4, got {d}");
+        assert_same_pixels(&pure, &opcv);
     }
 
     #[test]
@@ -497,10 +550,6 @@ mod tests {
         let opcv = rotate_crop_image(&img, box_, VisionBackend::OpenCv).expect("opencv crop");
         assert_eq!(pure.width(), opcv.width());
         assert_eq!(pure.height(), opcv.height());
-        let d = max_abs_diff(&pure.as_bgr_bytes(), &opcv.as_bgr_bytes());
-        assert!(
-            d <= 4,
-            "check_return_word_len box2 max abs diff should be <=4, got {d}"
-        );
+        assert_same_pixels(&pure, &opcv);
     }
 }

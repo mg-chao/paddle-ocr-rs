@@ -8,7 +8,7 @@ use crate::{
     config::RecognizerConfig,
     config::RuntimeConfig,
     det::detector::DetectorConfig,
-    error::{PaddleOcrError, Result},
+    error::{RapidOcrError, Result},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,76 +70,76 @@ impl EngineConfig {
         validate_inclusive_range("global.text_score", self.global.text_score, 0.0, 1.0)?;
 
         if self.global.min_height == 0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "global.min_height must be greater than zero".to_string(),
             ));
         }
         if self.global.min_side_len == 0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "global.min_side_len must be greater than zero".to_string(),
             ));
         }
         if self.global.max_side_len == 0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "global.max_side_len must be greater than zero".to_string(),
             ));
         }
         if self.global.min_side_len > self.global.max_side_len {
-            return Err(PaddleOcrError::Config(format!(
+            return Err(RapidOcrError::Config(format!(
                 "global.min_side_len ({}) must be <= global.max_side_len ({})",
                 self.global.min_side_len, self.global.max_side_len
             )));
         }
         if self.global.width_height_ratio <= 0.0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "global.width_height_ratio must be > 0".to_string(),
             ));
         }
 
         if self.det.limit_side_len == 0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "det.limit_side_len must be greater than zero".to_string(),
             ));
         }
         validate_inclusive_range("det.thresh", self.det.thresh, 0.0, 1.0)?;
         validate_inclusive_range("det.box_thresh", self.det.box_thresh, 0.0, 1.0)?;
         if self.det.max_candidates == 0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "det.max_candidates must be greater than zero".to_string(),
             ));
         }
         if self.det.unclip_ratio <= 0.0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "det.unclip_ratio must be > 0".to_string(),
             ));
         }
 
         if self.cls.cls_batch_num == 0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "cls.cls_batch_num must be greater than zero".to_string(),
             ));
         }
         validate_inclusive_range("cls.cls_thresh", self.cls.cls_thresh, 0.0, 1.0)?;
         if self.cls.cls_image_shape.contains(&0) {
-            return Err(PaddleOcrError::Config(format!(
+            return Err(RapidOcrError::Config(format!(
                 "cls.cls_image_shape must not contain zero values, got {:?}",
                 self.cls.cls_image_shape
             )));
         }
 
         if self.rec.rec_batch_num == 0 {
-            return Err(PaddleOcrError::Config(
+            return Err(RapidOcrError::Config(
                 "rec.rec_batch_num must be greater than zero".to_string(),
             ));
         }
         if self.rec.rec_img_shape[0] != 3 {
-            return Err(PaddleOcrError::Config(format!(
+            return Err(RapidOcrError::Config(format!(
                 "rec.rec_img_shape must start with channel=3, got {:?}",
                 self.rec.rec_img_shape
             )));
         }
         if self.rec.rec_img_shape.contains(&0) {
-            return Err(PaddleOcrError::Config(format!(
+            return Err(RapidOcrError::Config(format!(
                 "rec.rec_img_shape must not contain zero values, got {:?}",
                 self.rec.rec_img_shape
             )));
@@ -158,12 +158,12 @@ fn validate_native_required_sections(root: &Value) -> Result<()> {
 
     for section in required_sections {
         let Some(value) = mapping_get(root, section) else {
-            return Err(PaddleOcrError::Config(format!(
+            return Err(RapidOcrError::Config(format!(
                 "native config missing required section `{section}`"
             )));
         };
         if !value.is_mapping() {
-            return Err(PaddleOcrError::Config(format!(
+            return Err(RapidOcrError::Config(format!(
                 "native config section `{section}` must be a mapping"
             )));
         }
@@ -174,17 +174,17 @@ fn validate_native_required_sections(root: &Value) -> Result<()> {
 
 fn validate_runtime_config(prefix: &str, runtime: &RuntimeConfig) -> Result<()> {
     if runtime.intra_threads.is_some_and(|v| v == 0) {
-        return Err(PaddleOcrError::Config(format!(
+        return Err(RapidOcrError::Config(format!(
             "{prefix}.intra_threads must be greater than zero when set"
         )));
     }
     if runtime.inter_threads.is_some_and(|v| v == 0) {
-        return Err(PaddleOcrError::Config(format!(
+        return Err(RapidOcrError::Config(format!(
             "{prefix}.inter_threads must be greater than zero when set"
         )));
     }
     if runtime.rayon_threads.is_some_and(|v| v == 0) {
-        return Err(PaddleOcrError::Config(format!(
+        return Err(RapidOcrError::Config(format!(
             "{prefix}.rayon_threads must be greater than zero when set"
         )));
     }
@@ -193,7 +193,7 @@ fn validate_runtime_config(prefix: &str, runtime: &RuntimeConfig) -> Result<()> 
 
 fn validate_inclusive_range(name: &str, value: f32, min: f32, max: f32) -> Result<()> {
     if !(min..=max).contains(&value) {
-        return Err(PaddleOcrError::Config(format!(
+        return Err(RapidOcrError::Config(format!(
             "{name} must be in range [{min}, {max}], got {value}"
         )));
     }
